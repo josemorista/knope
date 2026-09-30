@@ -50,8 +50,7 @@ isProject: false
 <progress>This checklist is the live implementation tracker. Check each item as it is completed; the nested bullets carry the execution detail.</progress>
 
 - [ ] **1.1 Install babashka**
-  - Change: confirm with the user first, then install with the official
-    install script into `~/.local/bin` (see Open questions).
+  - Change: none. The user installed babashka v1.13.225 before the run.
   - Verify: `bb --version` prints a version.
 - [ ] **1.2 Project config**
   - Change: create `bb.edn` with `:paths ["src"]`, the pinned pod, and a `test`
@@ -107,9 +106,7 @@ isProject: false
 
 ## Open questions
 
-- Assumption: babashka is installed with the official install script into
-  `~/.local/bin`, which is already on `PATH`. Installing software is a change
-  to the user's machine, so confirm before running it.
+None. babashka is installed.
 
 ## Relevant files
 
