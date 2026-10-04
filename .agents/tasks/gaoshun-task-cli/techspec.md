@@ -393,17 +393,36 @@ named.
 - **Pod result shapes:** the README shows `execute!` and `query` but not what
   `PRAGMA user_version` returns. Increment 1 records the actual shape before
   `ensure-schema!` depends on it.
+  Result: `query` on `PRAGMA user_version` returns `[{:user_version 0}]`
+  (keyword-keyed, one row). `execute!` on `PRAGMA user_version = 1` returns
+  `{:rows-affected 0, :last-inserted-id 0}` and the next read shows 1.
+  `execute!` on an `INSERT` returns `{:rows-affected 1, :last-inserted-id n}`,
+  so `insert!` can read the id from `:last-inserted-id` as planned.
 - **Busy timeout:** unknown whether the pod sets one. Increment 1 runs two
   overlapping writes. If the second fails, either pass a timeout through the
   connection string (if the pod accepts one) or accept the failure for a
   single-user tool and record that here.
+  Result: the pod sets a busy timeout of about 5 seconds. A 14 second write
+  (20M-row insert) in one process, with a second process writing 4 seconds in,
+  made the second call wait 5008 ms and then fail with "database is locked".
+  Short overlapping writes wait and succeed, so nothing needs changing for a
+  single-user tool. No connection-string timeout was tried, since none is
+  needed.
 - **`?` binding:** increment 1 runs one query with repeated positional
   arguments to confirm the binding form used throughout.
+  Result: works. `["SELECT * FROM t WHERE a = ? OR b = ? OR a = ?" "x" "nope" "x"]`
+  binds each `?` positionally in order, and the same value can be passed for
+  several placeholders. The `day` query's `[d next-day d]` is safe.
 - **`bb --config` path resolution:** if babashka resolves `:paths` relative to
   the working directory instead of `bb.edn`, the wrapper breaks when run
   elsewhere. Increment 2's done condition tests exactly this; the fallback is
   `cd "$root"` in the wrapper, which is harmless because no command takes a
   relative path.
+  Result: `bb --config /abs/bb.edn -e "(require 'gaoshun.components)"` run from
+  an unrelated directory resolves `:paths` relative to the config file, and the
+  pod from that file's `:pods` loads. The same require without `--config`
+  fails with "Could not locate gaoshun/components...", so the config is what
+  makes it work. The `cd` fallback is not needed.
 - **Boolean flags:** the claim that an uncoerced flag swallows the next
   positional value comes from memory of `babashka.cli`, not from a run.
   Coercion costs nothing whether or not the claim holds; increment 4 tests
@@ -411,6 +430,11 @@ named.
 - **Leading-dash values:** `babashka.cli` may read `-1d` as a flag. Increments
   2 (`--due -2d`) and 5 (`day -1d`) test it; if the library claims them, the
   dispatch reads the raw value from the remaining args.
+  Result (increment 2): `babashka.cli` does not claim a leading-dash value that
+  follows an option. `["add" "x" "--due" "-2d"]` parses to
+  `{:title "x" :due "-2d"}`, with or without `:coerce {:due :string}`, so no
+  raw-args fallback is needed for `--due`. `day -1d` (a positional) is still
+  untested and belongs to increment 5.
 
 ### Requirements traceability
 

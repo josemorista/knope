@@ -51,18 +51,18 @@ when it finishes. Ship groups say which tasks merge together.
 **Merge safety:** new project. When the group lands, `gaoshun add` and
 `gaoshun list` work end to end through the wrapper.
 
-- [ ] **1.0 Runtime check and schema** — babashka and the pod run, the schema
+- [x] **1.0 Runtime check and schema** — babashka and the pod run, the schema
   including FTS is created and tested, and every runtime risk has a recorded
   result. **Blocked by:** None.
-  **Model:** sonnet · **Status:** pending · **Commit:** — · **Review:** —
-- [ ] **2.0 `add` end to end** — `run` dispatches `add`, which validates input,
+  **Model:** sonnet · **Status:** committed · **Commit:** `42dae3d` · **Review:** `reviews/1_review.md` (2 open)
+- [x] **2.0 `add` end to end** — `run` dispatches `add`, which validates input,
   inserts a task and prints `Added task N.`; bad input exits 1 with the spec's
   messages. **Blocked by:** 1.0.
-  **Model:** opus · **Status:** pending · **Commit:** — · **Review:** —
-- [ ] **3.0 Flat `list` and the wrapper** — `gaoshun list` shows open tasks
+  **Model:** opus · **Status:** committed · **Commit:** `898fc3b` · **Review:** `reviews/2_review.md` (5 open, incl. 1 Warning)
+- [x] **3.0 Flat `list` and the wrapper** — `gaoshun list` shows open tasks
   sorted by due date with colored relative labels, through `bin/gaoshun` from
   any directory. **Blocked by:** 2.0.
-  **Model:** opus · **Status:** pending · **Commit:** — · **Review:** —
+  **Model:** opus · **Status:** committed · **Commit:** `b4d60ce` · **Review:** `reviews/3_review.md` (3 open, Info only)
 
 ### Ship group B: subtasks and status changes
 
