@@ -43,3 +43,14 @@
   (sqlite.task/insert! (gen.task/task {:id nil :title "Write quarterly report"}) (db))
   (is (= [{:rowid 1}]
          (sqlite/query (db) ["SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH ?" "quarterly*"]))))
+
+(deftest list-all-returns-every-task-regardless-of-status
+  (let [tasks (mapv (fn [status title] (gen.task/task {:id nil :title title :status status}))
+                    [:todo :doing :done :dropped]
+                    ["a" "b" "c" "d"])
+        ids   (mapv #(sqlite.task/insert! % (db)) tasks)]
+    (is (= (mapv #(assoc %1 :id %2) tasks ids)
+           (vec (sort-by :id (sqlite.task/list-all (db))))))))
+
+(deftest list-all-on-an-empty-database-is-empty
+  (is (empty? (sqlite.task/list-all (db)))))

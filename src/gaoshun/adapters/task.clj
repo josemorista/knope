@@ -7,6 +7,8 @@
 
 (def ^:private created-at-format (DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss"))
 
+(def ^:private glyphs {:todo "[ ]" :doing "[~]" :done "[x]" :dropped "[-]"})
+
 (defn- parse-date [s]
   (when s (LocalDate/parse s)))
 
@@ -50,3 +52,12 @@
    (.format ^LocalDateTime created-at created-at-format)
    (format-date due-date)
    (format-date finish-date)])
+
+(defn task->display-row
+  [{:keys [id title status due-date]} today _extras]
+  (let [{:keys [text urgency]} (logic.date/due-label due-date today)]
+    {:glyph     (glyphs status)
+     :id        id
+     :title     title
+     :due-label text
+     :urgency   urgency}))

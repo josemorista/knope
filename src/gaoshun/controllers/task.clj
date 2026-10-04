@@ -7,3 +7,7 @@
   (let [task (logic.task/new-task attrs (clock))
         id   (sqlite.task/insert! task sqlite)]
     (assoc task :id id)))
+
+(defn list-tasks
+  [all? {:keys [sqlite]}]
+  (logic.task/build-tree (sqlite.task/list-all sqlite) {:all? all?}))

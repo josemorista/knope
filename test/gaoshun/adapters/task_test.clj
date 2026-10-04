@@ -103,3 +103,28 @@
   (let [task (gen.task/task {:status :done :note "n" :due-date (LocalDate/of 2026 10 1)})]
     (is (every? #(or (nil? %) (string? %) (integer? %))
                 (param-values (adapters.task/task->params task))))))
+
+(deftest task->display-row-picks-a-glyph-per-status
+  (doseq [[status glyph] {:todo "[ ]" :doing "[~]" :done "[x]" :dropped "[-]"}]
+    (testing status
+      (is (= {:glyph glyph :id 1 :title "Write report" :due-label nil :urgency nil}
+             (adapters.task/task->display-row (gen.task/task {:status status}) today {}))))))
+
+(deftest task->display-row-carries-id-and-title
+  (is (= {:glyph "[ ]" :id 4 :title "Ship it" :due-label nil :urgency nil}
+         (adapters.task/task->display-row (gen.task/task {:id 4 :title "Ship it"}) today {}))))
+
+(deftest task->display-row-labels-the-due-date-with-its-urgency
+  (doseq [[due text urgency] [[(LocalDate/of 2026 9 26) "2d overdue" :overdue]
+                              [(LocalDate/of 2026 9 27) "1d overdue" :overdue]
+                              [today "today" :soon]
+                              [(LocalDate/of 2026 9 29) "tomorrow" :soon]
+                              [(LocalDate/of 2026 10 1) "in 3d" :later]
+                              [(LocalDate/of 2026 10 6) "2026-10-06" :later]]]
+    (testing text
+      (is (= {:glyph "[ ]" :id 1 :title "Write report" :due-label text :urgency urgency}
+             (adapters.task/task->display-row (gen.task/task {:due-date due}) today {}))))))
+
+(deftest task->display-row-shows-no-due-label-for-an-undated-task
+  (is (= {:glyph "[ ]" :id 1 :title "Write report" :due-label nil :urgency nil}
+         (adapters.task/task->display-row (gen.task/task {:due-date nil}) today {}))))

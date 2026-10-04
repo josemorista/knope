@@ -36,3 +36,30 @@
              "2026-13-01" "2026-02-30" "2026-9-1" "10/01/2026" nil]]
     (testing (pr-str s)
       (is (nil? (logic.date/parse-date-input s today))))))
+
+(deftest due-label-today-and-tomorrow-are-soon
+  (is (= {:text "today" :urgency :soon} (logic.date/due-label today today)))
+  (is (= {:text "tomorrow" :urgency :soon} (logic.date/due-label (LocalDate/of 2026 9 29) today))))
+
+(deftest due-label-two-to-seven-days-out-is-relative-and-later
+  (is (= {:text "in 2d" :urgency :later} (logic.date/due-label (LocalDate/of 2026 9 30) today)))
+  (is (= {:text "in 3d" :urgency :later} (logic.date/due-label (LocalDate/of 2026 10 1) today)))
+  (is (= {:text "in 7d" :urgency :later} (logic.date/due-label (LocalDate/of 2026 10 5) today))))
+
+(deftest due-label-beyond-seven-days-shows-the-iso-date
+  (is (= {:text "2026-10-06" :urgency :later} (logic.date/due-label (LocalDate/of 2026 10 6) today)))
+  (is (= {:text "2027-03-01" :urgency :later} (logic.date/due-label (LocalDate/of 2027 3 1) today))))
+
+(deftest due-label-any-past-date-is-overdue
+  (is (= {:text "1d overdue" :urgency :overdue} (logic.date/due-label (LocalDate/of 2026 9 27) today)))
+  (is (= {:text "2d overdue" :urgency :overdue} (logic.date/due-label (LocalDate/of 2026 9 26) today)))
+  (is (= {:text "40d overdue" :urgency :overdue} (logic.date/due-label (LocalDate/of 2026 8 19) today))))
+
+(deftest due-label-crosses-month-and-year-boundaries
+  (is (= {:text "tomorrow" :urgency :soon}
+         (logic.date/due-label (LocalDate/of 2027 1 1) (LocalDate/of 2026 12 31))))
+  (is (= {:text "1d overdue" :urgency :overdue}
+         (logic.date/due-label (LocalDate/of 2026 12 31) (LocalDate/of 2027 1 1)))))
+
+(deftest due-label-is-nil-without-a-due-date
+  (is (nil? (logic.date/due-label nil today))))

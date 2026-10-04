@@ -1,6 +1,7 @@
 (ns gaoshun.logic.date
   (:import (java.time LocalDate)
-           (java.time.format DateTimeParseException)))
+           (java.time.format DateTimeParseException)
+           (java.time.temporal ChronoUnit)))
 
 (defn- parse-iso [s]
   (when (re-matches #"\d{4}-\d{2}-\d{2}" s)
@@ -19,3 +20,14 @@
         (let [days (Long/parseLong n)]
           (if (= "+" sign) (.plusDays today days) (.minusDays today days)))
         (parse-iso s)))))
+
+(defn due-label
+  [due today]
+  (when due
+    (let [days (.between ChronoUnit/DAYS today due)]
+      (cond
+        (neg? days) {:text (str (- days) "d overdue") :urgency :overdue}
+        (zero? days) {:text "today" :urgency :soon}
+        (= 1 days) {:text "tomorrow" :urgency :soon}
+        (<= days 7) {:text (str "in " days "d") :urgency :later}
+        :else {:text (str due) :urgency :later}))))

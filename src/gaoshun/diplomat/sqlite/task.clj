@@ -15,3 +15,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)"]
   (some-> (sqlite/query db-path ["SELECT * FROM tasks WHERE id = ?" id])
           first
           adapters.task/row->task))
+
+(defn list-all
+  [db-path]
+  (mapv adapters.task/row->task (sqlite/query db-path ["SELECT * FROM tasks"])))

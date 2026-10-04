@@ -37,3 +37,22 @@
               :created-at  now
               :due-date    due-date
               :finish-date nil}))
+
+(defn- compare-tasks
+  "Open before closed; open by due date ascending with undated last, then id;
+  closed by finish date descending, then id descending."
+  [a b]
+  (let [a-closed? (closed? (:status a))
+        b-closed? (closed? (:status b))]
+    (cond
+      (not= a-closed? b-closed?) (if a-closed? 1 -1)
+      a-closed? (compare [(:finish-date b) (:id b)] [(:finish-date a) (:id a)])
+      :else     (compare [(nil? (:due-date a)) (:due-date a) (:id a)]
+                         [(nil? (:due-date b)) (:due-date b) (:id b)]))))
+
+(defn build-tree
+  [tasks {:keys [all?]}]
+  (->> tasks
+       (filter #(or all? (not (closed? (:status %)))))
+       (sort compare-tasks)
+       (mapv (fn [task] {:task task}))))

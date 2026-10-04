@@ -103,3 +103,64 @@
 (deftest new-task-rejects-a-blank-title
   (is (invariant-violation?
        #(logic.task/new-task {:parent-id nil :title " " :note nil :due-date nil} now))))
+
+(defn- tasks-of
+  "The tasks of a build-tree result, in order. Entry shape is not fixed by the
+  spec beyond leaving room for :children and :context?, so accept either a
+  wrapper holding :task or the task itself."
+  [tree]
+  (mapv #(if (contains? % :task) (:task %) (dissoc % :children :context?)) tree))
+
+(defn- ids-of [tree] (mapv :id (tasks-of tree)))
+
+(deftest build-tree-of-nothing-is-empty
+  (is (empty? (logic.task/build-tree [] {})))
+  (is (empty? (logic.task/build-tree [] {:all? true}))))
+
+(deftest build-tree-without-all-keeps-only-todo-and-doing-tasks
+  (let [todo    (gen.task/task {:id 1 :status :todo})
+        doing   (gen.task/task {:id 2 :status :doing})
+        done    (gen.task/task {:id 3 :status :done})
+        dropped (gen.task/task {:id 4 :status :dropped})]
+    (is (= [todo doing]
+           (tasks-of (logic.task/build-tree [dropped done doing todo] {}))))
+    (is (= [todo doing]
+           (tasks-of (logic.task/build-tree [dropped done doing todo] {:all? false}))))))
+
+(deftest build-tree-with-all-keeps-every-task
+  (let [tasks (mapv (fn [id status] (gen.task/task {:id id :status status}))
+                    [1 2 3 4]
+                    [:todo :doing :done :dropped])]
+    (is (= (set tasks)
+           (set (tasks-of (logic.task/build-tree (reverse tasks) {:all? true})))))))
+
+(deftest build-tree-sorts-open-tasks-by-due-date-then-id-with-undated-last
+  (let [tasks [(gen.task/task {:id 1 :due-date (LocalDate/of 2026 10 5)})
+               (gen.task/task {:id 2 :due-date nil})
+               (gen.task/task {:id 3 :due-date (LocalDate/of 2026 9 29)})
+               (gen.task/task {:id 4 :due-date (LocalDate/of 2026 9 29)})
+               (gen.task/task {:id 5 :due-date nil})
+               (gen.task/task {:id 6 :due-date (LocalDate/of 2026 9 20)})]]
+    (is (= [6 3 4 1 2 5] (ids-of (logic.task/build-tree tasks {}))))
+    (is (= [6 3 4 1 2 5] (ids-of (logic.task/build-tree (reverse tasks) {}))))))
+
+(deftest build-tree-sorts-todo-and-doing-together-by-due-date
+  (let [tasks [(gen.task/task {:id 1 :status :todo :due-date (LocalDate/of 2026 10 2)})
+               (gen.task/task {:id 2 :status :doing :due-date (LocalDate/of 2026 10 1)})
+               (gen.task/task {:id 3 :status :todo :due-date (LocalDate/of 2026 10 1)})]]
+    (is (= [2 3 1] (ids-of (logic.task/build-tree tasks {}))))))
+
+(deftest build-tree-with-all-puts-open-before-closed
+  (let [tasks [(gen.task/task {:id 1 :status :done :finish-date (LocalDate/of 2026 9 28)})
+               (gen.task/task {:id 2 :status :todo :due-date nil})
+               (gen.task/task {:id 3 :status :dropped :finish-date (LocalDate/of 2026 9 28)})
+               (gen.task/task {:id 4 :status :doing :due-date (LocalDate/of 2026 12 1)})]]
+    (is (= [4 2 3 1] (ids-of (logic.task/build-tree tasks {:all? true}))))))
+
+(deftest build-tree-sorts-closed-tasks-by-finish-date-descending-then-id-descending
+  (let [tasks [(gen.task/task {:id 1 :status :done :finish-date (LocalDate/of 2026 9 27)})
+               (gen.task/task {:id 2 :status :done :finish-date (LocalDate/of 2026 9 27)})
+               (gen.task/task {:id 3 :status :done :finish-date (LocalDate/of 2026 9 20)})
+               (gen.task/task {:id 4 :status :dropped :finish-date (LocalDate/of 2026 9 28)})]]
+    (is (= [4 2 1 3] (ids-of (logic.task/build-tree tasks {:all? true}))))
+    (is (= [4 2 1 3] (ids-of (logic.task/build-tree (reverse tasks) {:all? true}))))))

@@ -1,14 +1,17 @@
 (ns gaoshun.diplomat.cli
   (:require [babashka.cli :as cli]
+            [clojure.string :as str]
             [gaoshun.adapters.task :as adapters.task]
             [gaoshun.components :as components]
-            [gaoshun.controllers.task :as controllers.task]))
+            [gaoshun.controllers.task :as controllers.task]
+            [gaoshun.diplomat.cli.render :as render]))
 
 (def ^:private usage
   "Usage: gaoshun <command> [options]
 
 Commands:
   add <title> [--due DATE] [--note TEXT]   Add a task.
+  list [--all]                             Show pending tasks; --all includes closed ones.
 ")
 
 (defn- error-message [{:error/keys [code details]}]
@@ -28,17 +31,26 @@ Commands:
       (let [task (controllers.task/add! attrs components)]
         {:exit 0 :out (str "Added task " (:id task) ".\n") :err ""}))))
 
+(defn- list-tasks [components opts {cli-opts :opts}]
+  (let [today (.toLocalDate ((:clock components)))
+        rows  (mapv #(adapters.task/task->display-row (:task %) today {})
+                    (controllers.task/list-tasks (boolean (:all cli-opts)) components))]
+    {:exit 0 :out (str (str/join "\n" (render/tree-lines rows opts)) "\n") :err ""}))
+
 (defn- fallback [{:keys [opts]}]
   (if (:help opts)
     {:exit 0 :out usage :err ""}
     {:exit 1 :out "" :err usage}))
 
 (defn run
-  [components _opts argv]
+  [components opts argv]
   (cli/dispatch [{:cmds       ["add"]
                   :fn         (partial add components)
                   :args->opts [:title]
                   :coerce     {:title :string :due :string :note :string}}
+                 {:cmds   ["list"]
+                  :fn     (partial list-tasks components opts)
+                  :coerce {:all :boolean}}
                  {:cmds [] :fn fallback}]
                 argv))
 
