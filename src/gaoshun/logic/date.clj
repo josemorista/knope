@@ -1,5 +1,5 @@
 (ns gaoshun.logic.date
-  (:import (java.time LocalDate)
+  (:import (java.time DateTimeException LocalDate)
            (java.time.format DateTimeParseException)
            (java.time.temporal ChronoUnit)))
 
@@ -17,8 +17,11 @@
       "tomorrow"  (.plusDays today 1)
       "yesterday" (.minusDays today 1)
       (if-let [[_ sign n] (re-matches #"([+-])(\d+)d" s)]
-        (let [days (Long/parseLong n)]
-          (if (= "+" sign) (.plusDays today days) (.minusDays today days)))
+        (try
+          (let [days (Long/parseLong n)]
+            (if (= "+" sign) (.plusDays today days) (.minusDays today days)))
+          (catch NumberFormatException _ nil)
+          (catch DateTimeException _ nil))
         (parse-iso s)))))
 
 (defn due-label

@@ -80,6 +80,14 @@
          (run "add" "x" "--due" "fri")))
   (is (empty? (rows))))
 
+(deftest a-value-option-without-a-value-fails
+  (doseq [[argv message] [[["add" "x" "--due"] "--due needs a value.\n"]
+                          [["add" "x" "--note"] "--note needs a value.\n"]
+                          [["list" "--page"] "--page needs a value.\n"]]]
+    (testing (pr-str argv)
+      (is (= {:exit 1 :out "" :err message} (apply run argv)))
+      (is (empty? (rows))))))
+
 (deftest help-prints-usage-and-exits-zero
   (let [{:keys [exit out err]} (run "--help")]
     (is (= 0 exit))

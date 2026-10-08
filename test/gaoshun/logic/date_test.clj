@@ -33,7 +33,8 @@
 
 (deftest parse-date-input-returns-nil-for-garbage
   (doseq [s ["fri" "" "  " "+d" "-d" "3d" "+3" "+3days" "+1.5d" "next week"
-             "2026-13-01" "2026-02-30" "2026-9-1" "10/01/2026" nil]]
+             "2026-13-01" "2026-02-30" "2026-9-1" "10/01/2026" nil
+             "+99999999999999999999d" "+999999999999d" "-999999999999d"]]
     (testing (pr-str s)
       (is (nil? (logic.date/parse-date-input s today))))))
 

@@ -83,7 +83,10 @@ revision session.
 - **Fix:** `(if-let [p (not-empty (get env "GAOSHUN_DB"))] (str (fs/absolutize p)) <home fallback>)`.
 - **Verified:** light check; read `components.clj:6-8`. Pod behavior on `""`
   unverified.
-- **Status:** open.
+- **Status:** resolved after merge on `fix/group-a-review-findings`. An empty
+  value falls back to `$HOME` and a relative one is made absolute and
+  normalized; two `db_test` cases cover both. Before the fix, an empty value
+  failed with "no such table: main.tasks".
 
 ## Requirements ledger
 

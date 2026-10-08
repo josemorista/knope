@@ -64,7 +64,10 @@ stack trace, and fixing it needs a user-facing message the spec doesn't define.
   wording is the developer's call.
 - **Verified:** reproduced through `-main` as above. The reviewer's original
   claim (bogus note stored, exit 0) was wrong; see Discarded.
-- **Status:** open (needs a decision on the message; not sent to the fix round).
+- **Status:** resolved after merge on `fix/group-a-review-findings`. `run`
+  catches the `babashka.cli` missing-value error and returns
+  `:validation/missing-value`, printed as `--<option> needs a value.`; it covers
+  `--due`, `--note` and `--page`, with integration tests for all three.
 
 ### INFO-1 — `parse-date-input` throws on very large offsets
 - **Axis:** correctness
@@ -75,7 +78,8 @@ stack trace, and fixing it needs a user-facing message the spec doesn't define.
 - **Fix:** catch both inside `parse-date-input` and return nil; add both inputs
   to the garbage test.
 - **Verified:** light check; the implementer reported the same behavior.
-- **Status:** open.
+- **Status:** resolved after merge on `fix/group-a-review-findings`, as
+  proposed, with a negative huge offset added to the garbage test too.
 
 ### INFO-2 — `add` reads the clock twice
 - **Axis:** correctness
@@ -86,7 +90,7 @@ stack trace, and fixing it needs a user-facing message the spec doesn't define.
   argv before the controller.
 - **Fix:** read the clock once in the CLI and pass `now` to both, or accept it.
 - **Verified:** light check; read both lines.
-- **Status:** open.
+- **Status:** accepted by the developer; no change.
 
 ### INFO-3 — `add --help` reports a missing title
 - **Axis:** correctness
