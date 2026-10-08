@@ -49,16 +49,15 @@ isProject: false
 
 <progress>This checklist is the live implementation tracker. Check each item as it is completed; the nested bullets carry the execution detail.</progress>
 
-- [ ] **1.1 Install babashka**
-  - Change: confirm with the user first, then install with the official
-    install script into `~/.local/bin` (see Open questions).
+- [x] **1.1 Install babashka**
+  - Change: none. The user installed babashka v1.13.225 before the run.
   - Verify: `bb --version` prints a version.
-- [ ] **1.2 Project config**
+- [x] **1.2 Project config**
   - Change: create `bb.edn` with `:paths ["src"]`, the pinned pod, and a `test`
     task that adds `test/` to the path, loads every `*-test` namespace, runs
     them, and exits 1 on any failure or error.
   - Verify: `bb test` runs and reports zero tests.
-- [ ] **1.3 Schema test first**
+- [x] **1.3 Schema test first**
   - Change: `test/gaoshun/helpers.clj` exposes a fixture that builds components
     through `gaoshun.components/components` with `GAOSHUN_DB` pointing at a temp
     file, then replaces `:clock` with a constant. Write
@@ -66,16 +65,16 @@ isProject: false
     `tasks_fts` exists, an FTS `MATCH` query runs, and a second
     `ensure-schema!` call is a no-op.
   - Verify: the test fails because the namespaces don't exist.
-- [ ] **1.4 `diplomat.sqlite.db/ensure-schema!`**
+- [x] **1.4 `diplomat.sqlite.db/ensure-schema!`**
   - Change: create the parent directory, read `PRAGMA user_version`, and on 0
     run the table, four indexes, FTS table and three triggers, then set the
     version. Copy the FTS DDL exactly from the techspec's "Schema" block.
   - Verify: the schema test passes.
-- [ ] **1.5 `gaoshun.components/components`**
+- [x] **1.5 `gaoshun.components/components`**
   - Change: path from `GAOSHUN_DB`, else `$HOME/.gaoshun/tasks.db`; call
     `ensure-schema!`; return the map with `(fn [] (LocalDateTime/now))`.
   - Verify: the fixture builds components against a temp path.
-- [ ] **1.6 Runtime checks, recorded**
+- [x] **1.6 Runtime checks, recorded**
   - Change: in a scratch REPL or throwaway test, check each item and write the
     result into techspec § Risks and open questions:
     - the exact shape `query` returns for `PRAGMA user_version`
@@ -86,19 +85,19 @@ isProject: false
       `:paths` relative to the config file
   - Verify: each Risks bullet has a "Result:" line. If one result breaks an
     assumption later tasks rely on, stop and raise it with the user.
-- [ ] **Tests**
+- [x] **Tests**
   - Write and run the task-level tests listed below; confirm failures are caused by missing behavior before implementation.
-- [ ] **Validate**
+- [x] **Validate**
   - Run `bb test`; resolve regressions before completion.
 
 ## Acceptance criteria
 
-- [ ] `bb test` passes with the schema test.
-- [ ] A fresh temp database ends with `user_version = 1`, the `tasks` table,
+- [x] `bb test` passes with the schema test.
+- [x] A fresh temp database ends with `user_version = 1`, the `tasks` table,
   four indexes, `tasks_fts` and three triggers.
-- [ ] Running `ensure-schema!` twice changes nothing.
-- [ ] All four runtime checks have recorded results in the techspec.
-- [ ] The tree is green at the boundary: build passes, suite passes.
+- [x] Running `ensure-schema!` twice changes nothing.
+- [x] All four runtime checks have recorded results in the techspec.
+- [x] The tree is green at the boundary: build passes, suite passes.
 
 ## Task tests
 
@@ -107,9 +106,7 @@ isProject: false
 
 ## Open questions
 
-- Assumption: babashka is installed with the official install script into
-  `~/.local/bin`, which is already on `PATH`. Installing software is a change
-  to the user's machine, so confirm before running it.
+None. babashka is installed.
 
 ## Relevant files
 

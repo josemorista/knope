@@ -1,0 +1,23 @@
+{:paths ["src"]
+ :pods {org.babashka/go-sqlite3 {:version "0.3.9"}}
+ :tasks
+ {test
+  {:extra-paths ["test"]
+   :requires ([babashka.fs :as fs]
+              [clojure.string :as str]
+              [clojure.test :as t])
+   :task (let [nss (->> (fs/glob "test" "**/*_test.clj")
+                        (map (fn [f]
+                               (-> (fs/relativize "test" f)
+                                   str
+                                   (str/replace ".clj" "")
+                                   (str/replace "/" ".")
+                                   (str/replace "_" "-")
+                                   symbol)))
+                        sort)]
+           (when (seq nss) (apply require nss))
+           (let [{:keys [fail error]} (if (seq nss)
+                                        (apply t/run-tests nss)
+                                        (do (println "Ran 0 tests containing 0 assertions.")
+                                            {:fail 0 :error 0}))]
+             (System/exit (if (pos? (+ fail error)) 1 0))))}}}

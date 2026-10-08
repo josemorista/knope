@@ -51,45 +51,45 @@ isProject: false
 
 <progress>This checklist is the live implementation tracker. Check each item as it is completed; the nested bullets carry the execution detail.</progress>
 
-- [ ] **2.1 Generator and `make-task`**
+- [x] **2.1 Generator and `make-task`**
   - Change: `logic/task.clj` with `make-task` and `new-task [attrs now]`;
     `test/gaoshun/gen/task.clj` builds valid tasks with overrides through
     `make-task`, keeping status and `:finish-date` consistent.
   - Verify: each invariant (unknown status, blank title, finish date present on
     an open task or missing on a closed one) throws.
-- [ ] **2.2 `logic.date/parse-date-input`**
+- [x] **2.2 `logic.date/parse-date-input`**
   - Change: ISO, `today`, `tomorrow`, `yesterday`, `+Nd`, `-Nd`; nil otherwise.
   - Verify: every form, `+0d`, month and year rollover, garbage.
-- [ ] **2.3 Adapters**
+- [x] **2.3 Adapters**
   - Change: `adapters/task.clj` with `args->new-attrs [opts today]`,
     `row->task` (snake_case keywords to the task map, via `make-task`) and
     `task->params`. Empty `--note` becomes nil.
   - Verify: row round trip, including `created_at` at zero seconds; missing
     title and bad date return error maps.
-- [ ] **2.4 SQLite `insert!` and `find-by-id`**
+- [x] **2.4 SQLite `insert!` and `find-by-id`**
   - Change: `diplomat/sqlite/task.clj`; `insert!` returns
     `:last-inserted-id`; `find-by-id` returns a task or nil. `?` placeholders.
   - Verify: insert then find returns an equal task map.
-- [ ] **2.5 Controller and CLI**
+- [x] **2.5 Controller and CLI**
   - Change: `controllers.task/add!` reads the clock once and inserts.
     `diplomat/cli.clj` with a `babashka.cli` dispatch table, `run
     [components opts argv]`, `-main`, usage on `--help` (exit 0) and unknown
     commands (exit 1), and the message table for the two codes above.
   - Verify: integration tests below.
-- [ ] **Tests**
+- [x] **Tests**
   - Write and run the task-level tests listed below; confirm failures are caused by missing behavior before implementation.
-- [ ] **Validate**
+- [x] **Validate**
   - Run `bb test`; resolve regressions before completion.
 
 ## Acceptance criteria
 
-- [ ] `add "x"` prints `Added task N.` and the row exists with status `todo`.
-- [ ] `add "x" --due -2d` stores the date two days before the fixed clock's
+- [x] `add "x"` prints `Added task N.` and the row exists with status `todo`.
+- [x] `add "x" --due -2d` stores the date two days before the fixed clock's
   date. If `babashka.cli` claims `-2d` as a flag, handle it as the techspec's
   "Leading-dash values" risk describes.
-- [ ] `add ""` and `add x --due fri` exit 1 with the table's messages on stderr.
-- [ ] `--help` exits 0; an unknown command exits 1; both print usage.
-- [ ] The tree is green at the boundary.
+- [x] `add ""` and `add x --due fri` exit 1 with the table's messages on stderr.
+- [x] `--help` exits 0; an unknown command exits 1; both print usage.
+- [x] The tree is green at the boundary.
 
 ## Task tests
 

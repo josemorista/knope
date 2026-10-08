@@ -47,44 +47,44 @@ isProject: false
 
 <progress>This checklist is the live implementation tracker. Check each item as it is completed; the nested bullets carry the execution detail.</progress>
 
-- [ ] **3.1 `logic.date/due-label`**
+- [x] **3.1 `logic.date/due-label`**
   - Change: `{:text :urgency}` per the contract.
   - Verify: each boundary, and nil due date returns nil.
-- [ ] **3.2 `logic.task/build-tree` (roots only)**
+- [x] **3.2 `logic.task/build-tree` (roots only)**
   - Change: without `:all?` keep open tasks; with it keep all. Open before
     closed; open by due ascending with nil last, then id; closed by finish date
     descending, then id descending. Return entries shaped so 4.0 can add
     `:children` and `:context?` without changing callers.
   - Verify: sort tests using generated tasks.
-- [ ] **3.3 Display rows and render**
+- [x] **3.3 Display rows and render**
   - Change: `adapters.task/task->display-row [task today extras]` with the four
     glyphs; `diplomat/cli/render.clj` `tree-lines` with ANSI red, yellow and
     dim, and `Nothing pending.` when empty.
   - Verify: adapter test for each status and urgency.
-- [ ] **3.4 `list-all`, `list-tasks`, and the `list` command**
+- [x] **3.4 `list-all`, `list-tasks`, and the `list` command**
   - Change: SQLite `list-all`; controller `list-tasks [all? components]`
     returns the tree; CLI adds `list` with `--all` coerced to boolean; `-main`
     computes `:color?`.
   - Verify: integration tests below.
-- [ ] **3.5 `bin/gaoshun`**
+- [x] **3.5 `bin/gaoshun`**
   - Change: bash wrapper per the techspec; mark executable; symlink into
     `~/.local/bin`.
   - Verify: the manual checks in Acceptance criteria. If `:paths` resolves
     against the working directory, apply the `cd "$root"` fallback from Risks.
-- [ ] **Tests**
+- [x] **Tests**
   - Write and run the task-level tests listed below; confirm failures are caused by missing behavior before implementation.
-- [ ] **Validate**
+- [x] **Validate**
   - Run `bb test`; resolve regressions before completion.
 
 ## Acceptance criteria
 
-- [ ] `list` shows only `todo`/`doing` tasks in the specified order.
-- [ ] `list --all` places closed tasks after open ones (closed rows come from
+- [x] `list` shows only `todo`/`doing` tasks in the specified order.
+- [x] `list --all` places closed tasks after open ones (closed rows come from
   generated data inserted directly until 5.0 adds transitions).
-- [ ] An empty database prints `Nothing pending.` and exits 0.
+- [x] An empty database prints `Nothing pending.` and exits 0.
 - [ ] Manual: `gaoshun list` from `/tmp` works; it prints color in a terminal
   and none with `| cat` or `NO_COLOR=1`.
-- [ ] The tree is green at the boundary.
+- [x] The tree is green at the boundary.
 
 ## Task tests
 
