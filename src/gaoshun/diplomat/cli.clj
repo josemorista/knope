@@ -19,7 +19,8 @@ Commands:
     :validation/missing-title "A task needs a title."
     :validation/bad-date      (str "Can't read date '" (:input details)
                                    "'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.")
-    :validation/bad-page      "--page needs a number."))
+    :validation/bad-page      "--page needs a number."
+    :validation/missing-value (str "--" (:option details) " needs a value.")))
 
 (defn- error-result [error]
   {:exit 1 :out "" :err (str (error-message error) "\n")})
@@ -52,8 +53,7 @@ Commands:
     {:exit 0 :out usage :err ""}
     {:exit 1 :out "" :err usage}))
 
-(defn run
-  [components opts argv]
+(defn- dispatch [components opts argv]
   (cli/dispatch [{:cmds       ["add"]
                   :fn         (partial add components)
                   :args->opts [:title]
@@ -63,6 +63,23 @@ Commands:
                   :coerce {:all :boolean :page :string}}
                  {:cmds [] :fn fallback}]
                 argv))
+
+(defn- missing-value
+  "babashka.cli throws when a value option ends the argv; turn that into our
+  error and rethrow anything else."
+  [e]
+  (let [{:keys [type cause implicit-value option]} (ex-data e)]
+    (if (and (= :org.babashka/cli type) (= :coerce cause) implicit-value)
+      (error-result {:error/code    :validation/missing-value
+                     :error/details {:option (name option)}})
+      (throw e))))
+
+(defn run
+  [components opts argv]
+  (try
+    (dispatch components opts argv)
+    (catch clojure.lang.ExceptionInfo e
+      (missing-value e))))
 
 (defn -main
   [& args]

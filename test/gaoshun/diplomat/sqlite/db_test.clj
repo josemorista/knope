@@ -35,6 +35,24 @@
       (finally
         (fs/delete-tree home)))))
 
+(deftest components-treat-an-empty-gaoshun-db-as-unset
+  (let [home (fs/create-temp-dir {:prefix "gaoshun-home-"})]
+    (try
+      (is (= (str (fs/path home ".gaoshun" "tasks.db"))
+             (:sqlite (components/components {"GAOSHUN_DB" "" "HOME" (str home)}))))
+      (finally
+        (fs/delete-tree home)))))
+
+(deftest components-resolve-a-relative-gaoshun-db-to-an-absolute-path
+  (let [dir      (fs/create-temp-dir {:prefix "gaoshun-rel-"})
+        expected (str (fs/path dir "tasks.db"))]
+    (try
+      (is (= expected
+             (:sqlite (components/components
+                       {"GAOSHUN_DB" (str (fs/relativize (fs/cwd) expected))}))))
+      (finally
+        (fs/delete-tree dir)))))
+
 (deftest fresh-database-ends-at-user-version-1
   (is (= 1 (user-version helpers/*db-path*))))
 

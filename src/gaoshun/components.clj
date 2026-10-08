@@ -4,8 +4,9 @@
   (:import (java.time LocalDateTime)))
 
 (defn- db-path [env]
-  (or (get env "GAOSHUN_DB")
-      (str (fs/path (get env "HOME") ".gaoshun" "tasks.db"))))
+  (if-let [path (not-empty (get env "GAOSHUN_DB"))]
+    (str (fs/normalize (fs/absolutize path)))
+    (str (fs/path (get env "HOME") ".gaoshun" "tasks.db"))))
 
 (defn components
   [env]

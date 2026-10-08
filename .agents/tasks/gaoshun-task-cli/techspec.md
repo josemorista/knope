@@ -78,7 +78,8 @@ by `logic.task/parent-error` in the controller and returned as an error value,
 not thrown.
 
 **Components.** `{:sqlite "/abs/path/tasks.db" :clock (fn [] (LocalDateTime/now))}`.
-The path comes from `GAOSHUN_DB`, falling back to `$HOME/.gaoshun/tasks.db`.
+The path comes from `GAOSHUN_DB`, made absolute and normalized, falling back to
+`$HOME/.gaoshun/tasks.db` when it is unset or empty.
 Tests pass a temp path and `(constantly fixed-now)`.
 
 **Error values.** Every expected failure is `{:error/code kw :error/details {...}}`.
@@ -99,6 +100,7 @@ message table and is the only place codes become text:
 | `:validation/conflicting-flags` | `--due and --clear-due can't be used together.` |
 | `:validation/empty-search` | `Search needs at least one word.` |
 | `:validation/bad-page` | `--page needs a number.` |
+| `:validation/missing-value` | `--due needs a value.` (names the option) |
 
 All of these print to stderr and exit 1. An unknown command prints usage and
 exits 1; `--help` prints usage and exits 0.
@@ -270,7 +272,9 @@ All files are new.
   three boolean flags, `--force`, `--all` and `--clear-due`, are coerced to
   `:boolean` so that `rm --force 3` does not read `3` as the flag's value.
   Every value-bearing option and positional argument stays a string, so the
-  adapter produces our error messages rather than the library's. `run` adapts,
+  adapter produces our error messages rather than the library's. A value
+  option at the end of argv makes `babashka.cli` throw; `run` catches that
+  one case and returns `:validation/missing-value`. `run` adapts,
   calls the controller, and turns the result into output or an error message;
   it requires no `diplomat.sqlite.*` namespace. `-main` builds components,
   computes `{:color? ...}`, and exits with the code `run` returns.
