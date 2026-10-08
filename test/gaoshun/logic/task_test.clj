@@ -325,3 +325,59 @@
 (deftest page-roots-drops-the-extra-root-and-its-children
   (let [tasks (roots-with-children 4)]
     (is (= {:tasks (vec (take 6 tasks)) :more? true} (logic.task/page-roots tasks 3)))))
+
+(def ^:private transition-day (LocalDate/of 2026 10 5))
+
+(defn- transition-subject
+  "A subtask with a due date and note, so a transition is seen to keep them."
+  [status]
+  (gen.task/task {:id 7 :parent-id 3 :note "for Q3" :due-date (LocalDate/of 2026 10 1) :status status}))
+
+(defn- illegal [status]
+  {:error/code :task/illegal-transition :error/details {:id 7 :status status}})
+
+(defn- applied [status & {:as changes}]
+  {:outcome :applied :task (merge (transition-subject status) changes)})
+
+(defn- unchanged [status]
+  {:outcome :unchanged :task (transition-subject status)})
+
+(defn- transition-cells
+  "Runs command from every status and compares with the expected result."
+  [command expected-by-status]
+  (doseq [[status expected] expected-by-status]
+    (testing (str command " from " status)
+      (is (= expected (logic.task/transition (transition-subject status) command transition-day))))))
+
+(deftest transition-start-moves-todo-to-doing-and-rejects-closed-tasks
+  (transition-cells :start
+                    {:todo    (applied :todo :status :doing)
+                     :doing   (unchanged :doing)
+                     :done    (illegal :done)
+                     :dropped (illegal :dropped)}))
+
+(deftest transition-done-closes-open-tasks-with-today-as-the-finish-date
+  (transition-cells :done
+                    {:todo    (applied :todo :status :done :finish-date transition-day)
+                     :doing   (applied :doing :status :done :finish-date transition-day)
+                     :done    (unchanged :done)
+                     :dropped (illegal :dropped)}))
+
+(deftest transition-drop-closes-open-tasks-with-today-as-the-finish-date
+  (transition-cells :drop
+                    {:todo    (applied :todo :status :dropped :finish-date transition-day)
+                     :doing   (applied :doing :status :dropped :finish-date transition-day)
+                     :done    (illegal :done)
+                     :dropped (unchanged :dropped)}))
+
+(deftest transition-reopen-returns-closed-tasks-to-todo-without-a-finish-date
+  (transition-cells :reopen
+                    {:todo    (unchanged :todo)
+                     :doing   (unchanged :doing)
+                     :done    (applied :done :status :todo :finish-date nil)
+                     :dropped (applied :dropped :status :todo :finish-date nil)}))
+
+(deftest transition-unchanged-keeps-the-original-finish-date
+  (let [done (gen.task/task {:id 7 :status :done :finish-date (LocalDate/of 2026 9 20)})]
+    (is (= {:outcome :unchanged :task done}
+           (logic.task/transition done :done transition-day)))))

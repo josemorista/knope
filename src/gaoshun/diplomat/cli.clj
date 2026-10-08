@@ -12,12 +12,17 @@
 Commands:
   add <title> [--due DATE] [--note TEXT] [--parent ID]   Add a task, or a subtask of ID.
   list [--all] [--page N]                  Show pending tasks, 50 per page; --all includes closed ones.
+  start ID                                 Mark a task as in progress.
+  done ID                                  Mark a task as done.
+  drop ID                                  Mark a task as dropped.
+  reopen ID                                Move a done or dropped task back to todo.
 ")
 
 (defn- error-message [{:error/keys [code details]}]
   (case code
     :task/not-found           (str "Task " (:id details) " not found.")
     :task/nesting-too-deep    (str "Task " (:id details) " is a subtask; subtasks can't have subtasks.")
+    :task/illegal-transition  (str "Task " (:id details) " is " (name (:status details)) "; reopen it first.")
     :validation/bad-id        (str "'" (:input details) "' is not a task id.")
     :validation/missing-title "A task needs a title."
     :validation/bad-date      (str "Can't read date '" (:input details)
@@ -63,6 +68,23 @@ Commands:
     {:exit 0 :out usage :err ""}
     {:exit 1 :out "" :err usage}))
 
+(def ^:private transition-messages
+  {:start  {:applied "started" :unchanged "is already in progress"}
+   :done   {:applied "marked done" :unchanged "is already done"}
+   :drop   {:applied "dropped" :unchanged "is already dropped"}
+   :reopen {:applied "reopened" :unchanged "is already open"}})
+
+(defn- transition [components command {:keys [opts] :as parsed}]
+  (if-let [id-arg (:id opts)]
+    (let [id (adapters.task/parse-id id-arg)]
+      (if (:error/code id)
+        (error-result id)
+        (let [{:keys [outcome task] :as result} (controllers.task/transition! id command components)]
+          (if (:error/code result)
+            (error-result result)
+            {:exit 0 :out (str "Task " (:id task) " " (get-in transition-messages [command outcome]) ".\n") :err ""}))))
+    (fallback parsed)))
+
 (defn- dispatch [components opts argv]
   (cli/dispatch [{:cmds       ["add"]
                   :fn         (partial add components)
@@ -71,6 +93,22 @@ Commands:
                  {:cmds   ["list"]
                   :fn     (partial list-tasks components opts)
                   :coerce {:all :boolean :page :string}}
+                 {:cmds       ["start"]
+                  :fn         (partial transition components :start)
+                  :args->opts [:id]
+                  :coerce     {:id :string}}
+                 {:cmds       ["done"]
+                  :fn         (partial transition components :done)
+                  :args->opts [:id]
+                  :coerce     {:id :string}}
+                 {:cmds       ["drop"]
+                  :fn         (partial transition components :drop)
+                  :args->opts [:id]
+                  :coerce     {:id :string}}
+                 {:cmds       ["reopen"]
+                  :fn         (partial transition components :reopen)
+                  :args->opts [:id]
+                  :coerce     {:id :string}}
                  {:cmds [] :fn fallback}]
                 argv))
 

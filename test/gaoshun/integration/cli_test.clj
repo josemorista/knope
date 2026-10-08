@@ -8,7 +8,7 @@
             [gaoshun.gen.task :as gen.task]
             [gaoshun.helpers :as helpers]
             [pod.babashka.go-sqlite3 :as sqlite])
-  (:import (java.time LocalDate)))
+  (:import (java.time LocalDate LocalDateTime)))
 
 (use-fixtures :each helpers/with-components)
 
@@ -418,3 +418,117 @@
       (is (= 0 exit))
       (is (str/includes? out "Pay rent"))
       (is (not (str/includes? out "\u001b"))))))
+
+(defn- task-row
+  "The stored row of a task made by (insert! {...}) with the generator defaults."
+  [status finish-date]
+  {:id          1
+   :parent_id   nil
+   :title       "Write report"
+   :note        nil
+   :status      status
+   :created_at  "2026-09-28T12:00:00"
+   :due_date    nil
+   :finish_date finish-date})
+
+(defn- run-on
+  "Runs argv with the clock set to the given date-time."
+  [now & argv]
+  (cli/run (assoc helpers/*components* :clock (constantly now)) {:color? false} (vec argv)))
+
+(deftest start-moves-a-todo-task-to-doing
+  (insert! {})
+  (is (= {:exit 0 :out "Task 1 started.\n" :err ""} (run "start" "1")))
+  (is (= [(task-row "doing" nil)] (rows))))
+
+(deftest start-on-a-doing-task-says-so-and-changes-nothing
+  (insert! {:status :doing})
+  (is (= {:exit 0 :out "Task 1 is already in progress.\n" :err ""} (run "start" "1")))
+  (is (= [(task-row "doing" nil)] (rows))))
+
+(deftest done-closes-an-open-task-with-the-clock-date
+  (doseq [status [:todo :doing]]
+    (testing status
+      (insert! {:status status})
+      (is (= {:exit 0 :out "Task 1 marked done.\n" :err ""} (run "done" "1")))
+      (is (= [(task-row "done" "2026-09-28")] (rows)))
+      (sqlite/execute! helpers/*db-path* ["DELETE FROM tasks"])
+      (sqlite/execute! helpers/*db-path* ["DELETE FROM sqlite_sequence WHERE name = 'tasks'"]))))
+
+(deftest a-repeated-done-keeps-the-original-finish-date
+  (insert! {})
+  (run "done" "1")
+  (is (= {:exit 0 :out "Task 1 is already done.\n" :err ""}
+         (run-on (LocalDateTime/of 2026 10 5 9 0 0) "done" "1")))
+  (is (= [(task-row "done" "2026-09-28")] (rows))))
+
+(deftest drop-closes-an-open-task-with-the-clock-date
+  (insert! {:status :doing})
+  (is (= {:exit 0 :out "Task 1 dropped.\n" :err ""} (run "drop" "1")))
+  (is (= [(task-row "dropped" "2026-09-28")] (rows))))
+
+(deftest a-repeated-drop-keeps-the-original-finish-date
+  (insert! {})
+  (run "drop" "1")
+  (is (= {:exit 0 :out "Task 1 is already dropped.\n" :err ""}
+         (run-on (LocalDateTime/of 2026 10 5 9 0 0) "drop" "1")))
+  (is (= [(task-row "dropped" "2026-09-28")] (rows))))
+
+(deftest reopen-returns-closed-tasks-to-todo-and-clears-the-finish-date
+  (doseq [status [:done :dropped]]
+    (testing status
+      (insert! {:status status})
+      (is (= {:exit 0 :out "Task 1 reopened.\n" :err ""} (run "reopen" "1")))
+      (is (= [(task-row "todo" nil)] (rows)))
+      (sqlite/execute! helpers/*db-path* ["DELETE FROM tasks"])
+      (sqlite/execute! helpers/*db-path* ["DELETE FROM sqlite_sequence WHERE name = 'tasks'"]))))
+
+(deftest reopen-on-an-open-task-says-so-and-changes-nothing
+  (insert! {:status :doing})
+  (is (= {:exit 0 :out "Task 1 is already open.\n" :err ""} (run "reopen" "1")))
+  (is (= [(task-row "doing" nil)] (rows))))
+
+(deftest an-illegal-move-fails-and-changes-nothing
+  (doseq [[status command message] [[:done "drop" "Task 1 is done; reopen it first.\n"]
+                                    [:done "start" "Task 1 is done; reopen it first.\n"]
+                                    [:dropped "done" "Task 1 is dropped; reopen it first.\n"]
+                                    [:dropped "start" "Task 1 is dropped; reopen it first.\n"]]]
+    (testing (str command " on " status)
+      (insert! {:status status})
+      (is (= {:exit 1 :out "" :err message} (run command "1")))
+      (is (= [(task-row (name status) "2026-09-28")] (rows)))
+      (sqlite/execute! helpers/*db-path* ["DELETE FROM tasks"])
+      (sqlite/execute! helpers/*db-path* ["DELETE FROM sqlite_sequence WHERE name = 'tasks'"]))))
+
+(deftest a-transition-on-an-unknown-id-fails
+  (doseq [command ["start" "done" "drop" "reopen"]]
+    (testing command
+      (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run command "99"))))))
+
+(deftest a-transition-with-a-bad-id-fails
+  (insert! {})
+  (doseq [command ["start" "done" "drop" "reopen"]
+          input   ["abc" "0" "-1"]]
+    (testing (str command " " input)
+      (is (= {:exit 1 :out "" :err (str "'" input "' is not a task id.\n")} (run command input)))))
+  (is (= [(task-row "todo" nil)] (rows))))
+
+(deftest done-on-a-parent-with-an-open-subtask-shows-it-as-a-dimmed-header
+  (run "add" "Parent")
+  (run "add" "Step" "--parent" "1")
+  (is (= {:exit 0 :out "Task 1 marked done.\n" :err ""} (run "done" "1")))
+  (let [{:keys [exit out err]} (run "list")
+        colored               (:out (cli/run helpers/*components* {:color? true} ["list"]))
+        header                (or (first (filter #(str/includes? % "Parent") (str/split-lines colored))) "")]
+    (is (= 0 exit))
+    (is (= "" err))
+    (assert-lines out [["[x]" "1" "Parent"]
+                       ["[ ]" "2" "Step"]])
+    (is (re-find #"^\[x\] 1 " (first (str/split-lines out))))
+    (is (re-find #"^  \[ \] 2 " (second (str/split-lines out))))
+    (is (str/includes? header "\u001b[2m"))))
+
+(deftest a-transition-without-an-id-prints-usage-and-exits-one
+  (doseq [command ["start" "done" "drop" "reopen"]]
+    (testing command
+      (is (= {:exit 1 :out "" :err @#'cli/usage} (run command))))))

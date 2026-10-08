@@ -93,3 +93,28 @@
 
     (:parent-id parent)
     {:error/code :task/nesting-too-deep :error/details {:id parent-id}}))
+
+(def ^:private transitions
+  {:start  {:to :doing   :applied #{:todo}          :unchanged #{:doing}}
+   :done   {:to :done    :applied #{:todo :doing}   :unchanged #{:done}}
+   :drop   {:to :dropped :applied #{:todo :doing}   :unchanged #{:dropped}}
+   :reopen {:to :todo    :applied #{:done :dropped} :unchanged #{:todo :doing}}})
+
+(defn transition
+  "Applies command to task. Returns {:outcome :applied :task t},
+  {:outcome :unchanged :task t} (nothing to write), or an illegal-transition
+  error."
+  [{:keys [id status] :as task} command today]
+  (let [{:keys [to applied unchanged]} (transitions command)]
+    (cond
+      (contains? applied status)
+      {:outcome :applied
+       :task    (make-task (assoc task
+                                  :status      to
+                                  :finish-date (when (closed? to) today)))}
+
+      (contains? unchanged status)
+      {:outcome :unchanged :task task}
+
+      :else
+      {:error/code :task/illegal-transition :error/details {:id id :status status}})))

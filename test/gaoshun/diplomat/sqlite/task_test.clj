@@ -151,3 +151,28 @@
            (root-ids all-tasks)))
     (is (= (mapv #(:id (:task %)) (logic.task/build-tree all-tasks {}))
            (root-ids (sqlite.task/list-open 100 0 (db)))))))
+
+(deftest update-then-find-returns-the-updated-task
+  (let [id      (sqlite.task/insert! (gen.task/task {:id nil :title "Old" :note "old note"
+                                                     :due-date (LocalDate/of 2026 10 1)})
+                                     (db))
+        updated (gen.task/task {:id id :title "New" :note "new note" :status :done
+                                :due-date (LocalDate/of 2026 10 9)
+                                :finish-date (LocalDate/of 2026 10 5)})]
+    (sqlite.task/update! updated (db))
+    (is (= updated (sqlite.task/find-by-id id (db))))))
+
+(deftest update-can-null-the-optional-columns
+  (let [id      (sqlite.task/insert! (gen.task/task {:id nil :note "n" :status :done
+                                                     :due-date (LocalDate/of 2026 10 1)})
+                                     (db))
+        updated (gen.task/task {:id id :note nil :status :todo :due-date nil :finish-date nil})]
+    (sqlite.task/update! updated (db))
+    (is (= updated (sqlite.task/find-by-id id (db))))))
+
+(deftest update-leaves-other-tasks-alone
+  (let [[first-task other] (insert-all! [(gen.task/task {:id nil :title "first"})
+                                         (gen.task/task {:id nil :title "other"})])]
+    (sqlite.task/update! (assoc first-task :status :doing) (db))
+    (is (= other (sqlite.task/find-by-id (:id other) (db))))
+    (is (= (assoc first-task :status :doing) (sqlite.task/find-by-id (:id first-task) (db))))))

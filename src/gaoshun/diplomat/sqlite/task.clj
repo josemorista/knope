@@ -55,3 +55,11 @@ VALUES (?, ?, ?, ?, ?, ?, ?)"]
 (defn list-all
   [limit offset db-path]
   (page-with-children "" limit offset db-path))
+
+(defn update!
+  [{:keys [id] :as task} db-path]
+  (sqlite/execute! db-path
+                   (into ["UPDATE tasks SET parent_id = ?, title = ?, note = ?, status = ?,
+created_at = ?, due_date = ?, finish_date = ? WHERE id = ?"]
+                         (conj (adapters.task/task->params task) id)))
+  nil)

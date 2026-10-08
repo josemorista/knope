@@ -10,6 +10,17 @@
             id   (sqlite.task/insert! task sqlite)]
         (assoc task :id id))))
 
+(defn transition!
+  "Moves task id by command. Only an :applied outcome is written, so a repeat
+  leaves the stored task, and its finish date, alone."
+  [id command {:keys [sqlite clock]}]
+  (if-let [task (sqlite.task/find-by-id id sqlite)]
+    (let [result (logic.task/transition task command (.toLocalDate ^java.time.LocalDateTime (clock)))]
+      (when (= :applied (:outcome result))
+        (sqlite.task/update! (:task result) sqlite))
+      result)
+    {:error/code :task/not-found :error/details {:id id}}))
+
 (def ^:private page-size 50)
 
 (defn list-tasks
