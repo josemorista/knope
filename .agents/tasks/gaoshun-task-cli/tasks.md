@@ -29,8 +29,8 @@
   - babashka v1.13.225 was installed by the user before the run, so 1.1 only
     verifies it. Models are the latest of each family (Opus 5.5, Sonnet 5.5).
   - The repo was initialized on `main` before the run (signed root commit
-    `01b76c1`). There is no remote: each ship group is a local branch stacked
-    on the previous one, and no PRs are opened.
+    `01b76c1`). Each ship group is a branch stacked on the previous one. The
+    private remote `josemorista/gaoshun` was added after group A.
 - **Review focus:** the size of 2.0 and 3.0, which are the largest tasks; and
   the 5.0 → 6.0/7.0/8.0 edges, which exist only because those tasks need
   finished tasks and `update!` in their tests.
@@ -46,7 +46,7 @@ when it finishes. Ship groups say which tasks merge together.
 
 ### Ship group A: a usable `add` and `list`
 
-**Branch:** `feat/add-and-list` · **Base:** `main` · **PR:** none (local only)
+**Branch:** `feat/add-and-list` · **Base:** `main` · **PR:** [#1](https://github.com/josemorista/gaoshun/pull/1) (draft)
 
 **Merge safety:** new project. When the group lands, `gaoshun add` and
 `gaoshun list` work end to end through the wrapper.
