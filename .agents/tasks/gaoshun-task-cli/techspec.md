@@ -121,6 +121,8 @@ On `:unchanged` the controller does not write, so an existing `finish_date` is
 kept. Success messages: `Task 12 started.`, `Task 12 marked done.`,
 `Task 12 dropped.`, `Task 12 reopened.`, and for no-ops `Task 12 is already
 in progress.`, `... already done.`, `... already dropped.`, `... already open.`
+A transition command with no id prints the usage to stderr and exits 1, like
+an unknown command.
 
 **Other command output.** `add` prints `Added task 12.` (the design's "prints
 the new id"). `edit` prints `Updated task 12.` `rm` prints `Deleted task 12.`,
@@ -214,7 +216,8 @@ loading the whole table took about 500 ms; `list` now takes about 3 ms and
 From 4.0, a page counts root families, not rows, so a parent is never split
 from its children: the query pages the roots (open roots, plus closed roots
 with an open child) and then fetches every child of those roots, which also
-keeps progress counts complete.
+keeps progress counts complete. The controller asks for 51 roots, and
+`logic.task/page-roots` drops the 51st with its children.
 
 The search argument comes from `adapters.task/search-match`. It splits the
 input on whitespace, drops every word that contains no letter or digit, doubles
@@ -242,6 +245,8 @@ All files are new.
   `:todo`, `created-at` = now), `transition`, `parent-error [parent-id parent]`
   (not found, or the parent is itself a subtask), `apply-edit [task changes]`,
   `progress [children]` (`{:done n :planned m}`, or nil when `m` is 0),
+  `page-roots [tasks page-size]` (drops the extra root fetched past the page,
+  with its children, and returns `{:tasks :more?}`),
   `build-tree [tasks {:all? bool}]`, and `day-sections [tasks day]`.
   - `build-tree` groups children under roots. Without `:all?`, it keeps a root
     that is open or has an open child, marks a closed root as `:context? true`,
