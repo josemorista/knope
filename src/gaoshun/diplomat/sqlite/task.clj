@@ -1,5 +1,6 @@
 (ns gaoshun.diplomat.sqlite.task
-  (:require [gaoshun.adapters.task :as adapters.task]
+  (:require [clojure.string :as str]
+            [gaoshun.adapters.task :as adapters.task]
             [pod.babashka.go-sqlite3 :as sqlite]))
 
 (defn insert!
@@ -27,15 +28,30 @@ VALUES (?, ?, ?, ?, ?, ?, ?)"]
          finish_date DESC,
          id DESC")
 
+(defn- page-with-children
+  "The roots selected by root-where, paged, followed by every child of those
+  roots. A page counts root families, so a parent is never split from its
+  children."
+  [root-where limit offset db-path]
+  (let [roots (mapv adapters.task/row->task
+                    (sqlite/query db-path [(str "SELECT * FROM tasks WHERE parent_id IS NULL" root-where
+                                                " " list-order " LIMIT ? OFFSET ?")
+                                           limit offset]))]
+    (if (empty? roots)
+      roots
+      (into roots
+            (map adapters.task/row->task)
+            (sqlite/query db-path
+                          (into [(str "SELECT * FROM tasks WHERE parent_id IN ("
+                                      (str/join ", " (repeat (count roots) "?")) ")")]
+                                (map :id roots)))))))
+
 (defn list-open
   [limit offset db-path]
-  (mapv adapters.task/row->task
-        (sqlite/query db-path [(str "SELECT * FROM tasks WHERE status IN ('todo', 'doing') "
-                                    list-order " LIMIT ? OFFSET ?")
-                               limit offset])))
+  (page-with-children " AND (status IN ('todo', 'doing')
+       OR id IN (SELECT parent_id FROM tasks WHERE status IN ('todo', 'doing')))"
+                      limit offset db-path))
 
 (defn list-all
   [limit offset db-path]
-  (mapv adapters.task/row->task
-        (sqlite/query db-path [(str "SELECT * FROM tasks " list-order " LIMIT ? OFFSET ?")
-                               limit offset])))
+  (page-with-children "" limit offset db-path))

@@ -257,6 +257,131 @@
       (is (= {:exit 1 :out "" :err "--page needs a number.\n"}
              (run "list" "--page" input))))))
 
+(deftest add-with-a-parent-stores-a-subtask
+  (run "add" "Parent")
+  (is (= {:exit 0 :out "Added task 2.\n" :err ""} (run "add" "step" "--parent" "1")))
+  (is (= [nil 1] (map :parent_id (rows)))))
+
+(deftest add-with-a-parent-that-is-a-subtask-fails
+  (run "add" "Parent")
+  (run "add" "step" "--parent" "1")
+  (is (= {:exit 1 :out "" :err "Task 2 is a subtask; subtasks can't have subtasks.\n"}
+         (run "add" "deeper" "--parent" "2")))
+  (is (= 2 (count (rows)))))
+
+(deftest add-with-a-missing-parent-fails
+  (run "add" "Parent")
+  (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "add" "step" "--parent" "99")))
+  (is (= 1 (count (rows)))))
+
+(deftest add-with-a-bad-parent-id-fails
+  (run "add" "Parent")
+  (doseq [input ["abc" "0" "-1"]]
+    (testing input
+      (is (= {:exit 1 :out "" :err (str "'" input "' is not a task id.\n")}
+             (run "add" "step" "--parent" input)))))
+  (is (= 1 (count (rows)))))
+
+(deftest list-indents-subtasks-under-their-parent-with-progress
+  (run "add" "Parent")
+  (run "add" "Later step" "--parent" "1")
+  (run "add" "Soon step" "--parent" "1" "--due" "tomorrow")
+  (insert! {:title "Finished step" :parent-id 1 :status :done})
+  (insert! {:title "Dropped step" :parent-id 1 :status :dropped})
+  (run "add" "Other" "--due" "today")
+  (let [{:keys [exit out err]} (run "list")
+        lines                  (str/split-lines out)]
+    (is (= 0 exit))
+    (is (= "" err))
+    (assert-lines out [["[ ]" "6" "Other" "today"]
+                       ["[ ]" "1" "Parent"]
+                       ["[ ]" "3" "Soon step" "tomorrow"]
+                       ["[ ]" "2" "Later step"]])
+    (is (str/includes? (get lines 1 "") "1/3"))
+    (is (re-find #"^\[ \] 6 " (get lines 0 "")))
+    (is (re-find #"^\[ \] 1 " (get lines 1 "")))
+    (is (re-find #"^  \[ \] 3 " (get lines 2 "")))
+    (is (re-find #"^  \[ \] 2 " (get lines 3 "")))))
+
+(deftest list-shows-a-fresh-parent-as-zero-over-one
+  (run "add" "Parent")
+  (run "add" "step" "--parent" "1")
+  (let [lines (str/split-lines (:out (run "list")))]
+    (is (= 2 (count lines)))
+    (is (str/includes? (first lines) "0/1"))
+    (is (re-find #"^  \[ \] 2 .*step" (second lines)))))
+
+(deftest list-all-shows-closed-subtasks-after-open-ones
+  (run "add" "Parent")
+  (run "add" "Open step" "--parent" "1")
+  (insert! {:title "Old step" :parent-id 1 :status :done :finish-date (LocalDate/of 2026 9 20)})
+  (insert! {:title "Recent step" :parent-id 1 :status :done :finish-date (LocalDate/of 2026 9 27)})
+  (let [{:keys [out]} (run "list" "--all")]
+    (assert-lines out [["[ ]" "1" "Parent"]
+                       ["[ ]" "2" "Open step"]
+                       ["[x]" "4" "Recent step"]
+                       ["[x]" "3" "Old step"]])
+    (is (every? #(re-find #"^  " %) (rest (str/split-lines out))))))
+
+(deftest list-keeps-a-closed-parent-as-context-for-an-open-subtask
+  (insert! {:title "Closed parent" :status :done})
+  (insert! {:title "Open step" :parent-id 1})
+  (insert! {:title "Closed step" :parent-id 1 :status :done})
+  (let [{:keys [exit out]} (run "list")
+        lines              (str/split-lines out)]
+    (is (= 0 exit))
+    (assert-lines out [["[x]" "1" "Closed parent"]
+                       ["[ ]" "2" "Open step"]])
+    (is (re-find #"^\[x\] 1 " (get lines 0 "")))
+    (is (re-find #"^  \[ \] 2 " (get lines 1 "")))))
+
+(deftest list-dims-a-closed-parent-shown-as-context
+  (insert! {:title "Closed parent" :status :done})
+  (insert! {:title "Open step" :parent-id 1})
+  (let [colored (:out (cli/run helpers/*components* {:color? true} ["list"]))
+        parent  (or (first (filter #(str/includes? % "Closed parent") (str/split-lines colored))) "")]
+    (is (str/includes? parent "\u001b[2m"))
+    (is (= (:out (run "list")) (str/replace colored ansi "")))))
+
+(deftest list-omits-a-closed-parent-whose-subtasks-are-all-closed
+  (insert! {:title "Closed parent" :status :done})
+  (insert! {:title "Closed step" :parent-id 1 :status :done})
+  (insert! {:title "Dropped step" :parent-id 1 :status :dropped})
+  (insert! {:title "Context parent" :status :done})
+  (insert! {:title "Open step" :parent-id 4})
+  (let [{:keys [out]} (run "list")]
+    (assert-lines out [["[x]" "4" "Context parent"]
+                       ["[ ]" "5" "Open step"]])
+    (is (re-find #"^  \[ \] 5 " (get (str/split-lines out) 1 "")))))
+
+(deftest list-pages-by-root-so-a-parent-stays-with-its-subtasks
+  (add-open-tasks! 51)
+  (insert! {:title "Step A" :parent-id 50})
+  (insert! {:title "Step B" :parent-id 50})
+  (let [lines (str/split-lines (:out (run "list")))]
+    (is (= 53 (count lines)))
+    (is (line-has? (get lines 49 "") ["[ ]" "50" "Task 50"]))
+    (is (re-find #"^  \[ \] 52 " (get lines 50 "")))
+    (is (re-find #"^  \[ \] 53 " (get lines 51 "")))
+    (is (= "More on page 1: gaoshun list --page 1" (last lines))))
+  (is (= {:exit 0 :out "[ ] 51 Task 51\n" :err ""} (run "list" "--page" "1"))))
+
+(deftest list-does-not-leak-the-subtasks-of-the-next-page-root
+  (add-open-tasks! 51)
+  (insert! {:title "Step of 51" :parent-id 51})
+  (let [lines (str/split-lines (:out (run "list")))]
+    (is (= 51 (count lines)))
+    (is (not-any? #(str/includes? % "Step of 51") lines))
+    (is (= "More on page 1: gaoshun list --page 1" (last lines))))
+  (is (= "[ ] 51 Task 51  0/1\n  [ ] 52 Step of 51\n" (:out (run "list" "--page" "1")))))
+
+(deftest list-with-exactly-fifty-roots-and-subtasks-has-no-pointer
+  (add-open-tasks! 50)
+  (insert! {:title "Step" :parent-id 50})
+  (let [lines (str/split-lines (:out (run "list")))]
+    (is (= 51 (count lines)))
+    (is (re-find #"^  \[ \] 51 " (last lines)))))
+
 (defn- bb-main-env
   "Like bb-main, from an unrelated working directory and with a controlled
   environment: GAOSHUN_TTY and NO_COLOR come only from env-overrides."

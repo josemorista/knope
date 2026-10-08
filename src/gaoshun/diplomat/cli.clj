@@ -10,12 +10,15 @@
   "Usage: gaoshun <command> [options]
 
 Commands:
-  add <title> [--due DATE] [--note TEXT]   Add a task.
+  add <title> [--due DATE] [--note TEXT] [--parent ID]   Add a task, or a subtask of ID.
   list [--all] [--page N]                  Show pending tasks, 50 per page; --all includes closed ones.
 ")
 
 (defn- error-message [{:error/keys [code details]}]
   (case code
+    :task/not-found           (str "Task " (:id details) " not found.")
+    :task/nesting-too-deep    (str "Task " (:id details) " is a subtask; subtasks can't have subtasks.")
+    :validation/bad-id        (str "'" (:input details) "' is not a task id.")
     :validation/missing-title "A task needs a title."
     :validation/bad-date      (str "Can't read date '" (:input details)
                                    "'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.")
@@ -31,7 +34,9 @@ Commands:
     (if (:error/code attrs)
       (error-result attrs)
       (let [task (controllers.task/add! attrs components)]
-        {:exit 0 :out (str "Added task " (:id task) ".\n") :err ""}))))
+        (if (:error/code task)
+          (error-result task)
+          {:exit 0 :out (str "Added task " (:id task) ".\n") :err ""})))))
 
 (defn- more-line [all? page]
   (str "More on page " (inc page) ": gaoshun list " (when all? "--all ") "--page " (inc page)))
@@ -43,8 +48,13 @@ Commands:
       (error-result page)
       (let [today                (.toLocalDate ((:clock components)))
             {:keys [tree more?]} (controllers.task/list-tasks all? page components)
-            rows                 (mapv #(adapters.task/task->display-row (:task %) today {}) tree)
-            lines                (cond-> (render/tree-lines rows opts)
+            entries              (mapv (fn [{:keys [task children progress context?]}]
+                                         {:row      (adapters.task/task->display-row
+                                                     task today {:progress progress :dimmed? context?})
+                                          :children (mapv #(adapters.task/task->display-row % today {})
+                                                          children)})
+                                       tree)
+            lines                (cond-> (render/tree-lines entries opts)
                                    more? (conj (more-line all? page)))]
         {:exit 0 :out (str (str/join "\n" lines) "\n") :err ""}))))
 
@@ -57,7 +67,7 @@ Commands:
   (cli/dispatch [{:cmds       ["add"]
                   :fn         (partial add components)
                   :args->opts [:title]
-                  :coerce     {:title :string :due :string :note :string}}
+                  :coerce     {:title :string :due :string :note :string :parent :string}}
                  {:cmds   ["list"]
                   :fn     (partial list-tasks components opts)
                   :coerce {:all :boolean :page :string}}
