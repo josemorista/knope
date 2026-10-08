@@ -128,3 +128,17 @@
 (deftest task->display-row-shows-no-due-label-for-an-undated-task
   (is (= {:glyph "[ ]" :id 1 :title "Write report" :due-label nil :urgency nil}
          (adapters.task/task->display-row (gen.task/task {:due-date nil}) today {}))))
+
+(deftest parse-page-defaults-to-the-first-page
+  (is (= 0 (adapters.task/parse-page nil))))
+
+(deftest parse-page-reads-a-whole-number-from-zero
+  (doseq [[input page] [["0" 0] ["1" 1] ["12" 12]]]
+    (testing input
+      (is (= page (adapters.task/parse-page input))))))
+
+(deftest parse-page-reports-anything-else
+  (doseq [input ["-1" "abc" "1.5" "" "99999999999999999999"]]
+    (testing input
+      (is (= {:error/code :validation/bad-page :error/details {:input input}}
+             (adapters.task/parse-page input))))))

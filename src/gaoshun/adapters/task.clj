@@ -61,3 +61,11 @@
      :title     title
      :due-label text
      :urgency   urgency}))
+
+(defn parse-page
+  [s]
+  (let [page (when s (parse-long s))]
+    (cond
+      (nil? s)        0
+      (nat-int? page) page
+      :else           {:error/code :validation/bad-page :error/details {:input s}})))

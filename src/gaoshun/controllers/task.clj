@@ -8,6 +8,13 @@
         id   (sqlite.task/insert! task sqlite)]
     (assoc task :id id)))
 
+(def ^:private page-size 50)
+
 (defn list-tasks
-  [all? {:keys [sqlite]}]
-  (logic.task/build-tree (sqlite.task/list-all sqlite) {:all? all?}))
+  "One page of the tree, and whether another page follows. Fetches one row past
+  the page to answer that without a COUNT."
+  [all? page {:keys [sqlite]}]
+  (let [list-fn (if all? sqlite.task/list-all sqlite.task/list-open)
+        tasks   (list-fn (inc page-size) (* page page-size) sqlite)]
+    {:tree  (logic.task/build-tree (take page-size tasks) {:all? all?})
+     :more? (> (count tasks) page-size)}))

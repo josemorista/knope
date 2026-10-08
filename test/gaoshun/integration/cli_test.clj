@@ -202,6 +202,53 @@
     (is (str/includes? (line-of "Plan trip") "\u001b[2m"))
     (is (= plain (str/replace colored ansi "")))))
 
+(defn- add-open-tasks! [n]
+  (doseq [i (range 1 (inc n))]
+    (insert! {:title (str "Task " i)})))
+
+(deftest list-shows-fifty-tasks-and-points-to-the-next-page
+  (add-open-tasks! 51)
+  (let [{:keys [exit out err]} (run "list")
+        lines                  (str/split-lines out)]
+    (is (= 0 exit))
+    (is (= "" err))
+    (is (= 51 (count lines)))
+    (is (line-has? (nth lines 49) ["[ ]" "50" "Task 50"]))
+    (is (= "More on page 1: gaoshun list --page 1" (last lines)))))
+
+(deftest list-page-one-shows-the-rest-without-a-pointer
+  (add-open-tasks! 51)
+  (is (= {:exit 0 :out "[ ] 51 Task 51\n" :err ""} (run "list" "--page" "1"))))
+
+(deftest list-with-exactly-fifty-tasks-has-no-pointer
+  (add-open-tasks! 50)
+  (let [lines (str/split-lines (:out (run "list")))]
+    (is (= 50 (count lines)))
+    (is (line-has? (last lines) ["[ ]" "50" "Task 50"]))))
+
+(deftest list-past-the-last-page-says-nothing-pending
+  (add-open-tasks! 3)
+  (is (= {:exit 0 :out "Nothing pending.\n" :err ""} (run "list" "--page" "1")))
+  (is (= {:exit 0 :out "Nothing pending.\n" :err ""} (run "list" "--all" "--page" "4"))))
+
+(deftest list-all-pages-closed-tasks-and-keeps-all-in-the-pointer
+  (add-open-tasks! 50)
+  (insert! {:title "Finished" :status :done})
+  (insert! {:title "Abandoned" :status :dropped})
+  (let [lines (str/split-lines (:out (run "list" "--all")))]
+    (is (= 51 (count lines)))
+    (is (= "More on page 1: gaoshun list --all --page 1" (last lines))))
+  (let [{:keys [exit out]} (run "list" "--all" "--page" "1")]
+    (is (= 0 exit))
+    (assert-lines out [["[-]" "52" "Abandoned"]
+                       ["[x]" "51" "Finished"]])))
+
+(deftest list-with-a-bad-page-fails
+  (doseq [input ["abc" "-1" "1.5"]]
+    (testing input
+      (is (= {:exit 1 :out "" :err "--page needs a number.\n"}
+             (run "list" "--page" input))))))
+
 (defn- bb-main-env
   "Like bb-main, from an unrelated working directory and with a controlled
   environment: GAOSHUN_TTY and NO_COLOR come only from env-overrides."

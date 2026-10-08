@@ -75,7 +75,7 @@ gaoshun add "title" [--due DATE] [--parent ID] [--note TEXT]   # prints the new 
 gaoshun start ID | done ID | drop ID | reopen ID
 gaoshun edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]
 gaoshun rm ID [--force]
-gaoshun list [--all]
+gaoshun list [--all] [--page N]
 gaoshun day [DATE]
 gaoshun search TEXT
 ```
@@ -92,7 +92,8 @@ subtasks unless `--force` is given, in which case the subtasks are deleted too.
 includes `done` and `dropped`. Open tasks come first, sorted by due date
 ascending with undated tasks last. Closed tasks follow, sorted by `finish_date`
 descending so the most recently finished work reads first. Subtasks render
-indented under their parent, ordered by the same rules.
+indented under their parent, ordered by the same rules. `list` shows 50
+root tasks per page; `--page N` (0-based) moves through them.
 
 `day` defaults to today and renders three sections, which are disjoint by
 construction:

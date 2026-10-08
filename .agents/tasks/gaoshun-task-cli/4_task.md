@@ -40,6 +40,7 @@ isProject: false
 |---|---|---|
 | Nesting check | § Shared contracts, "Task map" (refinement paragraph) | `parent-error [parent-id parent]` returns an error map; it is not a `make-task` invariant. |
 | Tree rules | § Component changes (`build-tree`) | Keep a root that is open or has an open child; closed root gets `:context? true`; hide closed children; progress counts all children. |
+| Paging | § Data and storage, "Queries" | A page counts root families: `list-open` and `list-all` page the roots, then fetch all their children. |
 | Progress | design.md § Display | Done over non-dropped; nil when all dropped. |
 | Errors | § Shared contracts, "Error values" | Add `:task/not-found`, `:task/nesting-too-deep`, `:validation/bad-id`. |
 
@@ -58,9 +59,12 @@ isProject: false
   - Verify: both errors; progress with mixed statuses and with all dropped.
 - [ ] **4.3 `build-tree` grouping**
   - Change: attach children to roots, ordered by the same sort rules; apply the
-    open-mode filtering and `:context?` marking.
+    open-mode filtering and `:context?` marking. `list-open` grows to select
+    open roots and closed roots with an open child, and both list queries page
+    by root and return every child of the page's roots.
   - Verify: open root with closed child, closed root with open child, closed
-    root with only closed children (omitted), `:all?` showing everything.
+    root with only closed children (omitted), `:all?` showing everything, and a
+    page boundary that never splits a parent from its children.
 - [ ] **4.4 Display rows**
   - Change: `task->display-row` takes `extras` with progress (rendered `3/5`),
     `:dimmed?` for context roots, and `:parent-ref` (`↳ #12`).

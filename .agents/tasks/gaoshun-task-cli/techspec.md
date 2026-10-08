@@ -98,6 +98,7 @@ message table and is the only place codes become text:
 | `:validation/nothing-to-edit` | `Nothing to change. Pass --title, --due, --note or --clear-due.` |
 | `:validation/conflicting-flags` | `--due and --clear-due can't be used together.` |
 | `:validation/empty-search` | `Search needs at least one word.` |
+| `:validation/bad-page` | `--page needs a number.` |
 
 All of these print to stderr and exit 1. An unknown command prints usage and
 exits 1; `--help` prints usage and exits 0.
@@ -196,11 +197,22 @@ on both `finish_date` and `created_at`, each side of the `OR` is indexable,
 which lets SQLite use both instead of scanning; the day slice confirms this
 with `EXPLAIN QUERY PLAN`.
 
-`list` and `list --all` both run `SELECT * FROM tasks` and leave all selection
-to `logic.task/build-tree`. That keeps the "which families are shown" rule in
-one place, and progress counts see closed subtasks for free. The table is a
-personal log of thousands of rows at most; if loading it ever shows up as
-startup lag, a filtering query can come back then.
+`list` and `list --all` read one page of 50 at a time. `list` runs
+`list-open` (`WHERE status IN ('todo', 'doing')`, served by `tasks_status_idx`)
+and `list --all` runs `list-all`. Both use one shared `ORDER BY` that mirrors
+`logic.task/build-tree`'s sort, so `LIMIT ? OFFSET ?` pages through the order
+the user sees; a sqlite test checks the two orders agree. The controller asks
+for 51 rows: the 51st is dropped and only tells `run` to print
+`More on page N: gaoshun list [--all] --page N`. `--page` is 0-based, defaults
+to 0, and anything other than a whole number from 0 is `:validation/bad-page`.
+A page past the end prints `Nothing pending.` At 20,000 rows with 200 open,
+loading the whole table took about 500 ms; `list` now takes about 3 ms and
+`list --all` 15 to 51 ms depending on the page.
+
+From 4.0, a page counts root families, not rows, so a parent is never split
+from its children: the query pages the roots (open roots, plus closed roots
+with an open child) and then fetches every child of those roots, which also
+keeps progress counts complete.
 
 The search argument comes from `adapters.task/search-match`. It splits the
 input on whitespace, drops every word that contains no letter or digit, doubles
@@ -238,20 +250,22 @@ All files are new.
     design's three predicates.
 - **`src/gaoshun/adapters/task.clj`:** `row->task`, `task->params`,
   `args->new-attrs [opts today]`, `args->changes [opts today]`, `parse-id`,
+  `parse-page`,
   `search-match`, and `task->display-row [task today extras]`. Display rows
   carry the glyph (`[ ]`, `[~]`, `[x]`, `[-]`), id, title, due label and
   urgency, `3/5` progress text, `↳ #12` parent reference (used by `day` and
   `search`), and a `:dimmed?` flag.
 - **`src/gaoshun/controllers/task.clj`:** `add!`, `transition!`, `edit!`,
   `remove!`, `list-tasks`, `day`, and `search`, each ending with components as
-  its last argument. `add!` with a parent checks `parent-error` first.
+  its last argument. `list-tasks [all? page components]` returns
+  `{:tree :more?}`. `add!` with a parent checks `parent-error` first.
   `remove!` returns `:task/has-subtasks` unless forced, and a forced delete of
   a parent is the single statement `DELETE FROM tasks WHERE id = ? OR parent_id = ?`.
 - **`src/gaoshun/diplomat/sqlite/db.clj`:** `ensure-schema!`. The only namespace
   besides `diplomat.sqlite.task` that requires the pod namespace.
 - **`src/gaoshun/diplomat/sqlite/task.clj`:** `find-by-id`, `count-children`,
   `insert!` (returns the id from `:last-inserted-id`), `update!`, `delete!`,
-  `list-all`, `day-rows`, and `search`.
+  `list-open`, `list-all`, `day-rows`, and `search`.
 - **`src/gaoshun/diplomat/cli.clj`:** a `babashka.cli` dispatch table. The
   three boolean flags, `--force`, `--all` and `--clear-due`, are coerced to
   `:boolean` so that `rm --force 3` does not read `3` as the flag's value.
@@ -343,7 +357,7 @@ that code's tests from "Test behaviors" first. Namespaces grow across slices.
    "Risks" has its result recorded in this spec.
 2. **`add` and `list`.** Generator; `make-task`, `new-task`, `parent-error`,
    `progress`, `build-tree`; `parse-date-input` and `due-label`; the row and
-   argv adapters; `insert!`, `find-by-id`, `list-all`; `add!` and `list-tasks`;
+   argv adapters; `insert!`, `find-by-id`, `list-open`, `list-all`; `add!` and `list-tasks`;
    `run`, `-main`, the message table, `tree-lines`; and `bin/gaoshun`. Done when
    `gaoshun add` and `gaoshun list` work from an unrelated directory, with color
    in a terminal and none when piped or with `NO_COLOR` set.
@@ -374,10 +388,11 @@ that code's tests from "Test behaviors" first. Namespaces grow across slices.
   changes of intent are illegal.
 - **Map-shaped errors everywhere:** one predicate, and messages that can name
   the id.
-- **`list` loads the whole table:** one pod call, and the selection rule lives
-  only in `build-tree`. Trades reading closed history on every `list` for
-  having one definition of what is shown. Chosen over a family-selecting CTE
-  in the plan review.
+- **`list` reads one page from SQL:** `WHERE` and `LIMIT`/`OFFSET` with an
+  `ORDER BY` that mirrors `build-tree`'s sort. Trades a second definition of
+  the order (pinned to the first by a test) for not loading closed history on
+  every `list`. Replaces the plan review's whole-table load after a 20,000-row
+  measurement showed about 500 ms per `list`.
 - **Vertical slices:** a usable `add` and `list` arrive in the second
   increment, at the cost of touching each layer's files several times.
 - **Local date-times, not `Instant`:** the day view is about the calendar day as
@@ -444,9 +459,12 @@ named.
   transition-table tests plus integration tests.
 - **`finish_date` semantics:** `transition`, `make-task` invariant; `logic.task`
   and integration tests.
-- **Pending list with tree, context parent, progress:** `list-all`,
+- **Pending list with tree, context parent, progress:** `list-open`,
   `build-tree`, `progress`, `tree-lines`; `logic.task` and integration `list` tests.
-- **`list --all` ordering:** `build-tree`; `logic.task` sort tests.
+- **`list --all` ordering:** `build-tree`; `logic.task` sort tests; the
+  sqlite test that the `ORDER BY` matches `build-tree`.
+- **Paging:** `list-open`, `list-all`, `parse-page`; sqlite paging tests and
+  integration `list --page` tests.
 - **Day view, three sections:** `day` query, `day-sections`; sqlite boundary and
   `logic.task` section tests.
 - **Full-text search:** FTS table and triggers, `search-match`; sqlite FTS sync
