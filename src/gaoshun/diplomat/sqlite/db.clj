@@ -18,7 +18,8 @@
    "CREATE INDEX IF NOT EXISTS tasks_created_at_idx ON tasks(created_at)"
    "CREATE INDEX IF NOT EXISTS tasks_finish_date_idx ON tasks(finish_date)"
    "CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts
-  USING fts5(title, note, content='tasks', content_rowid='id')"
+  USING fts5(title, note, content='tasks', content_rowid='id',
+             tokenize=\"unicode61 remove_diacritics 2\")"
    "CREATE TRIGGER IF NOT EXISTS tasks_fts_ai AFTER INSERT ON tasks BEGIN
   INSERT INTO tasks_fts(rowid, title, note) VALUES (new.id, new.title, new.note);
 END"
@@ -26,7 +27,8 @@ END"
   INSERT INTO tasks_fts(tasks_fts, rowid, title, note)
     VALUES ('delete', old.id, old.title, old.note);
 END"
-   "CREATE TRIGGER IF NOT EXISTS tasks_fts_au AFTER UPDATE OF title, note ON tasks BEGIN
+   "CREATE TRIGGER IF NOT EXISTS tasks_fts_au AFTER UPDATE OF title, note ON tasks
+  WHEN old.title IS NOT new.title OR old.note IS NOT new.note BEGIN
   INSERT INTO tasks_fts(tasks_fts, rowid, title, note)
     VALUES ('delete', old.id, old.title, old.note);
   INSERT INTO tasks_fts(rowid, title, note) VALUES (new.id, new.title, new.note);
