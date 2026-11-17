@@ -10,12 +10,20 @@
   "Usage: gaoshun <command> [options]
 
 Commands:
-  add <title> [--due DATE] [--note TEXT]   Add a task.
+  add <title> [--due DATE] [--note TEXT] [--parent ID]   Add a task, or a subtask of ID.
   list [--all] [--page N]                  Show pending tasks, 50 per page; --all includes closed ones.
+  start ID                                 Mark a task as in progress.
+  done ID                                  Mark a task as done.
+  drop ID                                  Mark a task as dropped.
+  reopen ID                                Move a done or dropped task back to todo.
 ")
 
 (defn- error-message [{:error/keys [code details]}]
   (case code
+    :task/not-found           (str "Task " (:id details) " not found.")
+    :task/nesting-too-deep    (str "Task " (:id details) " is a subtask; subtasks can't have subtasks.")
+    :task/illegal-transition  (str "Task " (:id details) " is " (name (:status details)) "; reopen it first.")
+    :validation/bad-id        (str "'" (:input details) "' is not a task id.")
     :validation/missing-title "A task needs a title."
     :validation/bad-date      (str "Can't read date '" (:input details)
                                    "'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.")
@@ -31,7 +39,9 @@ Commands:
     (if (:error/code attrs)
       (error-result attrs)
       (let [task (controllers.task/add! attrs components)]
-        {:exit 0 :out (str "Added task " (:id task) ".\n") :err ""}))))
+        (if (:error/code task)
+          (error-result task)
+          {:exit 0 :out (str "Added task " (:id task) ".\n") :err ""})))))
 
 (defn- more-line [all? page]
   (str "More on page " (inc page) ": gaoshun list " (when all? "--all ") "--page " (inc page)))
@@ -43,8 +53,13 @@ Commands:
       (error-result page)
       (let [today                (.toLocalDate ((:clock components)))
             {:keys [tree more?]} (controllers.task/list-tasks all? page components)
-            rows                 (mapv #(adapters.task/task->display-row (:task %) today {}) tree)
-            lines                (cond-> (render/tree-lines rows opts)
+            entries              (mapv (fn [{:keys [task children progress context?]}]
+                                         {:row      (adapters.task/task->display-row
+                                                     task today {:progress progress :dimmed? context?})
+                                          :children (mapv #(adapters.task/task->display-row % today {})
+                                                          children)})
+                                       tree)
+            lines                (cond-> (render/tree-lines entries opts)
                                    more? (conj (more-line all? page)))]
         {:exit 0 :out (str (str/join "\n" lines) "\n") :err ""}))))
 
@@ -53,14 +68,47 @@ Commands:
     {:exit 0 :out usage :err ""}
     {:exit 1 :out "" :err usage}))
 
+(def ^:private transition-messages
+  {:start  {:applied "started" :unchanged "is already in progress"}
+   :done   {:applied "marked done" :unchanged "is already done"}
+   :drop   {:applied "dropped" :unchanged "is already dropped"}
+   :reopen {:applied "reopened" :unchanged "is already open"}})
+
+(defn- transition [components command {:keys [opts] :as parsed}]
+  (if-let [id-arg (:id opts)]
+    (let [id (adapters.task/parse-id id-arg)]
+      (if (:error/code id)
+        (error-result id)
+        (let [{:keys [outcome task] :as result} (controllers.task/transition! id command components)]
+          (if (:error/code result)
+            (error-result result)
+            {:exit 0 :out (str "Task " (:id task) " " (get-in transition-messages [command outcome]) ".\n") :err ""}))))
+    (fallback parsed)))
+
 (defn- dispatch [components opts argv]
   (cli/dispatch [{:cmds       ["add"]
                   :fn         (partial add components)
                   :args->opts [:title]
-                  :coerce     {:title :string :due :string :note :string}}
+                  :coerce     {:title :string :due :string :note :string :parent :string}}
                  {:cmds   ["list"]
                   :fn     (partial list-tasks components opts)
                   :coerce {:all :boolean :page :string}}
+                 {:cmds       ["start"]
+                  :fn         (partial transition components :start)
+                  :args->opts [:id]
+                  :coerce     {:id :string}}
+                 {:cmds       ["done"]
+                  :fn         (partial transition components :done)
+                  :args->opts [:id]
+                  :coerce     {:id :string}}
+                 {:cmds       ["drop"]
+                  :fn         (partial transition components :drop)
+                  :args->opts [:id]
+                  :coerce     {:id :string}}
+                 {:cmds       ["reopen"]
+                  :fn         (partial transition components :reopen)
+                  :args->opts [:id]
+                  :coerce     {:id :string}}
                  {:cmds [] :fn fallback}]
                 argv))
 

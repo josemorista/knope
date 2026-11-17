@@ -48,16 +48,16 @@ isProject: false
 
 <progress>This checklist is the live implementation tracker. Check each item as it is completed; the nested bullets carry the execution detail.</progress>
 
-- [ ] **4.1 `adapters.task/parse-id`**
+- [x] **4.1 `adapters.task/parse-id`**
   - Change: positive integer string to long, otherwise `:validation/bad-id`
     with the raw value in details.
   - Verify: `"12"`, `"abc"`, `"0"`, `"-1"`.
-- [ ] **4.2 `parent-error` and `progress`**
+- [x] **4.2 `parent-error` and `progress`**
   - Change: `parent-error` returns `:task/not-found` for a nil parent and
     `:task/nesting-too-deep` when the parent has a `:parent-id`. `progress`
     per the design.
   - Verify: both errors; progress with mixed statuses and with all dropped.
-- [ ] **4.3 `build-tree` grouping**
+- [x] **4.3 `build-tree` grouping**
   - Change: attach children to roots, ordered by the same sort rules; apply the
     open-mode filtering and `:context?` marking. `list-open` grows to select
     open roots and closed roots with an open child, and both list queries page
@@ -65,28 +65,28 @@ isProject: false
   - Verify: open root with closed child, closed root with open child, closed
     root with only closed children (omitted), `:all?` showing everything, and a
     page boundary that never splits a parent from its children.
-- [ ] **4.4 Display rows**
+- [x] **4.4 Display rows**
   - Change: `task->display-row` takes `extras` with progress (rendered `3/5`),
     `:dimmed?` for context roots, and `:parent-ref` (`↳ #12`).
     `render/tree-lines` indents children two spaces and dims context roots.
   - Verify: adapter tests for each extra.
-- [ ] **4.5 `add --parent`**
+- [x] **4.5 `add --parent`**
   - Change: adapter parses `--parent` with `parse-id`; `add!` looks up the
     parent with `find-by-id` and returns `parent-error`'s result when non-nil.
   - Verify: integration tests below.
-- [ ] **Tests**
+- [x] **Tests**
   - Write and run the task-level tests listed below; confirm failures are caused by missing behavior before implementation.
-- [ ] **Validate**
+- [x] **Validate**
   - Run `bb test`; resolve regressions before completion.
 
 ## Acceptance criteria
 
-- [ ] `add x --parent 1` stores `parent_id = 1`; `list` shows it indented under
+- [x] `add x --parent 1` stores `parent_id = 1`; `list` shows it indented under
   task 1, which shows `0/1`.
-- [ ] `--parent` pointing at a subtask exits 1 with the nesting message;
+- [x] `--parent` pointing at a subtask exits 1 with the nesting message;
   pointing at a missing id exits 1 with `Task N not found.`; `--parent abc`
   exits 1 with the bad-id message.
-- [ ] The tree is green at the boundary.
+- [x] The tree is green at the boundary.
 
 ## Task tests
 

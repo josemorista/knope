@@ -66,18 +66,18 @@ when it finishes. Ship groups say which tasks merge together.
 
 ### Ship group B: subtasks and status changes
 
-**Branch:** `feat/subtasks-and-transitions` · **Base:** `main` · **PR:** none (local only)
+**Branch:** `feat/subtasks-and-transitions` · **Base:** `main` · **PR:** [#3](https://github.com/josemorista/gaoshun/pull/3)
 
 **Merge safety:** additive commands and flags only; group A behavior is
 unchanged except that `list` now nests subtasks.
 
-- [ ] **4.0 Subtasks** — `add --parent` creates a subtask, nesting rules are
+- [x] **4.0 Subtasks** — `add --parent` creates a subtask, nesting rules are
   enforced, and `list` renders subtasks indented with progress. **Blocked by:** 3.0.
-  **Model:** sonnet · **Status:** pending · **Commit:** — · **Review:** —
-- [ ] **5.0 Status transitions** — `start`, `done`, `drop` and `reopen` follow
+  **Model:** sonnet · **Status:** committed · **Commit:** `869213e` · **Review:** `reviews/4_review.md` (2 open, Info only)
+- [x] **5.0 Status transitions** — `start`, `done`, `drop` and `reopen` follow
   the transition table, idempotently, and `list` shows the dimmed parent
   header. **Blocked by:** 4.0.
-  **Model:** sonnet · **Status:** pending · **Commit:** — · **Review:** —
+  **Model:** sonnet · **Status:** committed · **Commit:** `9f0d3e3` · **Review:** `reviews/5_review.md` (2 open, Info only)
 
 ### Ship group C: editing and deletion
 

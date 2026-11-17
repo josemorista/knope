@@ -142,3 +142,47 @@
     (testing input
       (is (= {:error/code :validation/bad-page :error/details {:input input}}
              (adapters.task/parse-page input))))))
+
+(deftest parse-id-reads-a-positive-integer
+  (doseq [[input id] [["12" 12] ["1" 1]]]
+    (testing input
+      (is (= id (adapters.task/parse-id input))))))
+
+(deftest parse-id-reports-anything-else-with-the-raw-value
+  (doseq [input ["abc" "0" "-1" "" "1.5" " 12" "99999999999999999999"]]
+    (testing (pr-str input)
+      (is (= {:error/code :validation/bad-id :error/details {:input input}}
+             (adapters.task/parse-id input))))))
+
+(deftest args->new-attrs-reads-the-parent-id
+  (is (= {:title "step" :note nil :due-date nil :parent-id 3}
+         (adapters.task/args->new-attrs {:title "step" :parent "3"} today))))
+
+(deftest args->new-attrs-has-no-parent-by-default
+  (is (= {:title "x" :note nil :due-date nil :parent-id nil}
+         (adapters.task/args->new-attrs {:title "x"} today))))
+
+(deftest args->new-attrs-reports-a-bad-parent-id
+  (doseq [input ["abc" "0" "-1"]]
+    (testing input
+      (is (= {:error/code :validation/bad-id :error/details {:input input}}
+             (adapters.task/args->new-attrs {:title "x" :parent input} today))))))
+
+(deftest task->display-row-renders-progress-as-done-over-planned
+  (is (= {:glyph "[ ]" :id 1 :title "Write report" :due-label nil :urgency nil :progress "3/5"}
+         (adapters.task/task->display-row
+          (gen.task/task) today {:progress {:done 3 :planned 5}}))))
+
+(deftest task->display-row-has-no-progress-text-without-progress
+  (is (= {:glyph "[ ]" :id 1 :title "Write report" :due-label nil :urgency nil}
+         (adapters.task/task->display-row (gen.task/task) today {:progress nil}))))
+
+(deftest task->display-row-flags-a-dimmed-context-row
+  (is (= {:glyph "[x]" :id 1 :title "Write report" :due-label nil :urgency nil :dimmed? true}
+         (adapters.task/task->display-row
+          (gen.task/task {:status :done}) today {:dimmed? true}))))
+
+(deftest task->display-row-writes-a-parent-reference
+  (is (= {:glyph "[ ]" :id 13 :title "Write report" :due-label nil :urgency nil :parent-ref "↳ #12"}
+         (adapters.task/task->display-row
+          (gen.task/task {:id 13 :parent-id 12}) today {:parent-ref 12}))))

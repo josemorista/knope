@@ -15,9 +15,17 @@
 (defn- format-date [^LocalDate d]
   (when d (str d)))
 
+(defn parse-id
+  [s]
+  (let [id (parse-long s)]
+    (if (and id (pos? id))
+      id
+      {:error/code :validation/bad-id :error/details {:input s}})))
+
 (defn args->new-attrs
-  [{:keys [title due note]} today]
-  (let [due-date (when due (logic.date/parse-date-input due today))]
+  [{:keys [title due note parent]} today]
+  (let [due-date  (when due (logic.date/parse-date-input due today))
+        parent-id (when parent (parse-id parent))]
     (cond
       (str/blank? title)
       {:error/code :validation/missing-title :error/details {}}
@@ -25,10 +33,14 @@
       (and due (nil? due-date))
       {:error/code :validation/bad-date :error/details {:input due}}
 
+      (:error/code parent-id)
+      parent-id
+
       :else
-      {:title    title
-       :note     (when-not (= "" note) note)
-       :due-date due-date})))
+      {:title     title
+       :note      (when-not (= "" note) note)
+       :due-date  due-date
+       :parent-id parent-id})))
 
 (defn row->task
   [{:keys [id parent_id title note status created_at due_date finish_date]}]
@@ -54,13 +66,16 @@
    (format-date finish-date)])
 
 (defn task->display-row
-  [{:keys [id title status due-date]} today _extras]
+  [{:keys [id title status due-date]} today {:keys [progress dimmed? parent-ref]}]
   (let [{:keys [text urgency]} (logic.date/due-label due-date today)]
-    {:glyph     (glyphs status)
-     :id        id
-     :title     title
-     :due-label text
-     :urgency   urgency}))
+    (cond-> {:glyph     (glyphs status)
+             :id        id
+             :title     title
+             :due-label text
+             :urgency   urgency}
+      progress   (assoc :progress (str (:done progress) "/" (:planned progress)))
+      dimmed?    (assoc :dimmed? true)
+      parent-ref (assoc :parent-ref (str "↳ #" parent-ref)))))
 
 (defn parse-page
   [s]

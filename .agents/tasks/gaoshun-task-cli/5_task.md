@@ -48,40 +48,40 @@ isProject: false
 
 <progress>This checklist is the live implementation tracker. Check each item as it is completed; the nested bullets carry the execution detail.</progress>
 
-- [ ] **5.1 `logic.task/transition`**
+- [x] **5.1 `logic.task/transition`**
   - Change: `[task command today]` returns `{:outcome :applied :task t}`,
     `{:outcome :unchanged :task t}`, or the illegal-transition error map with
     the id and current status in details. Build the new task through
     `make-task`, so the `finish_date` invariant is enforced.
   - Verify: all 16 cells, whole-map comparison.
-- [ ] **5.2 SQLite `update!`**
+- [x] **5.2 SQLite `update!`**
   - Change: update every mutable column of a task by id, one statement.
   - Verify: update then `find-by-id` returns the updated map.
-- [ ] **5.3 `controllers.task/transition!`**
+- [x] **5.3 `controllers.task/transition!`**
   - Change: `[id command components]`: find, return `:task/not-found` if
     missing, transition with today from the clock, `update!` only on
     `:applied`.
   - Verify: covered by integration tests.
-- [ ] **5.4 CLI commands**
+- [x] **5.4 CLI commands**
   - Change: dispatch entries for `start`, `done`, `drop`, `reopen`, each
     taking `ID` through `parse-id`; message mapping by command and outcome.
   - Verify: integration tests below.
-- [ ] **Tests**
+- [x] **Tests**
   - Write and run the task-level tests listed below; confirm failures are caused by missing behavior before implementation.
-- [ ] **Validate**
+- [x] **Validate**
   - Run `bb test`; resolve regressions before completion.
 
 ## Acceptance criteria
 
-- [ ] `done N` sets status and `finish_date` to the clock's date; a second
+- [x] `done N` sets status and `finish_date` to the clock's date; a second
   `done N` with a later clock prints `Task N is already done.` and leaves the
   original date.
-- [ ] `reopen N` on a done task sets `todo` and nulls `finish_date`.
-- [ ] `drop N` on a done task exits 1 with `Task N is done; reopen it first.`
-- [ ] Marking a parent done while a subtask is open makes `list` show the
+- [x] `reopen N` on a done task sets `todo` and nulls `finish_date`.
+- [x] `drop N` on a done task exits 1 with `Task N is done; reopen it first.`
+- [x] Marking a parent done while a subtask is open makes `list` show the
   parent as a dimmed header with the subtask under it.
-- [ ] Unknown id exits 1 with `Task N not found.`
-- [ ] The tree is green at the boundary.
+- [x] Unknown id exits 1 with `Task N not found.`
+- [x] The tree is green at the boundary.
 
 ## Task tests
 

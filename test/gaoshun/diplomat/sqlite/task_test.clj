@@ -91,3 +91,88 @@
 (deftest list-on-an-empty-database-is-empty
   (is (= [] (sqlite.task/list-all 50 0 (db))))
   (is (= [] (sqlite.task/list-open 50 0 (db)))))
+
+(defn- insert-families!
+  "Seven roots and seven children, ids fixed by insertion order.
+  Open roots in list order: 1 3 2 7. Closed roots in --all order after them: 6 4 5.
+  Root 4 is closed with an open child, 5 is closed with only a closed child, 6 has no children."
+  []
+  (let [ins! (fn [overrides] (sqlite.task/insert! (gen.task/task (assoc overrides :id nil)) (db)))
+        d    #(LocalDate/of 2026 9 %)]
+    (ins! {:title "R1" :due-date (LocalDate/of 2026 9 29)})
+    (ins! {:title "R2"})
+    (ins! {:title "R3" :due-date (LocalDate/of 2026 10 1)})
+    (ins! {:title "R4" :status :done :finish-date (d 27)})
+    (ins! {:title "R5" :status :done :finish-date (d 26)})
+    (ins! {:title "R6" :status :dropped :finish-date (d 28)})
+    (ins! {:title "R7"})
+    (ins! {:title "c1" :parent-id 1 :due-date (d 30)})
+    (ins! {:title "c2" :parent-id 1 :status :done})
+    (ins! {:title "c3" :parent-id 3 :status :dropped})
+    (ins! {:title "c4" :parent-id 4})
+    (ins! {:title "c5" :parent-id 5 :status :done})
+    (ins! {:title "c6" :parent-id 7 :status :doing})
+    (ins! {:title "c7" :parent-id 7})))
+
+(defn- root-ids [tasks] (mapv :id (remove :parent-id tasks)))
+
+(defn- family-ids [tasks] (set (map :id tasks)))
+
+(deftest list-open-pages-by-root-and-returns-every-child-of-the-page-roots
+  (insert-families!)
+  (testing "open roots, then closed roots that have an open child"
+    (is (= [1 3] (root-ids (sqlite.task/list-open 2 0 (db)))))
+    (is (= [2 7] (root-ids (sqlite.task/list-open 2 2 (db)))))
+    (is (= [4] (root-ids (sqlite.task/list-open 2 4 (db))))))
+  (testing "a page never splits a parent from its children, closed children included"
+    (is (= #{1 3 8 9 10} (family-ids (sqlite.task/list-open 2 0 (db)))))
+    (is (= #{2 7 13 14} (family-ids (sqlite.task/list-open 2 2 (db)))))
+    (is (= #{4 11} (family-ids (sqlite.task/list-open 2 4 (db))))))
+  (testing "children do not count against the limit"
+    (is (= #{1 3 2 8 9 10} (family-ids (sqlite.task/list-open 3 0 (db))))))
+  (testing "past the last root"
+    (is (= [] (sqlite.task/list-open 2 5 (db))))))
+
+(deftest list-all-pages-by-root-and-returns-every-child-of-the-page-roots
+  (insert-families!)
+  (is (= [1 3 2] (root-ids (sqlite.task/list-all 3 0 (db)))))
+  (is (= [7 6 4] (root-ids (sqlite.task/list-all 3 3 (db)))))
+  (is (= [5] (root-ids (sqlite.task/list-all 3 6 (db)))))
+  (is (= #{1 3 2 8 9 10} (family-ids (sqlite.task/list-all 3 0 (db)))))
+  (is (= #{7 13 14 6 4 11} (family-ids (sqlite.task/list-all 3 3 (db)))))
+  (is (= #{5 12} (family-ids (sqlite.task/list-all 3 6 (db)))))
+  (is (= [] (sqlite.task/list-all 3 7 (db)))))
+
+(deftest list-queries-order-roots-like-build-tree
+  (insert-families!)
+  (let [all-tasks (sqlite.task/list-all 100 0 (db))]
+    (is (= 14 (count all-tasks)))
+    (is (= (mapv #(:id (:task %)) (logic.task/build-tree all-tasks {:all? true}))
+           (root-ids all-tasks)))
+    (is (= (mapv #(:id (:task %)) (logic.task/build-tree all-tasks {}))
+           (root-ids (sqlite.task/list-open 100 0 (db)))))))
+
+(deftest update-then-find-returns-the-updated-task
+  (let [id      (sqlite.task/insert! (gen.task/task {:id nil :title "Old" :note "old note"
+                                                     :due-date (LocalDate/of 2026 10 1)})
+                                     (db))
+        updated (gen.task/task {:id id :title "New" :note "new note" :status :done
+                                :due-date (LocalDate/of 2026 10 9)
+                                :finish-date (LocalDate/of 2026 10 5)})]
+    (sqlite.task/update! updated (db))
+    (is (= updated (sqlite.task/find-by-id id (db))))))
+
+(deftest update-can-null-the-optional-columns
+  (let [id      (sqlite.task/insert! (gen.task/task {:id nil :note "n" :status :done
+                                                     :due-date (LocalDate/of 2026 10 1)})
+                                     (db))
+        updated (gen.task/task {:id id :note nil :status :todo :due-date nil :finish-date nil})]
+    (sqlite.task/update! updated (db))
+    (is (= updated (sqlite.task/find-by-id id (db))))))
+
+(deftest update-leaves-other-tasks-alone
+  (let [[first-task other] (insert-all! [(gen.task/task {:id nil :title "first"})
+                                         (gen.task/task {:id nil :title "other"})])]
+    (sqlite.task/update! (assoc first-task :status :doing) (db))
+    (is (= other (sqlite.task/find-by-id (:id other) (db))))
+    (is (= (assoc first-task :status :doing) (sqlite.task/find-by-id (:id first-task) (db))))))
