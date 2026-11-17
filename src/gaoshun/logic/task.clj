@@ -38,6 +38,10 @@
               :due-date    due-date
               :finish-date nil}))
 
+(defn apply-edit
+  [task changes]
+  (make-task (merge task changes)))
+
 (defn- compare-tasks
   "Open before closed; open by due date ascending with undated last, then id;
   closed by finish date descending, then id descending."

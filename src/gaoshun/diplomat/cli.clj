@@ -10,12 +10,13 @@
   "Usage: gaoshun <command> [options]
 
 Commands:
-  add <title> [--due DATE] [--note TEXT] [--parent ID]  Add a task, or a subtask of ID.
-  list [--all] [--page N]                               Show pending tasks, 50 per page; --all includes closed ones.
-  start ID                                              Mark a task as in progress.
-  done ID                                               Mark a task as done.
-  drop ID                                               Mark a task as dropped.
-  reopen ID                                             Move a done or dropped task back to todo.
+  add <title> [--due DATE] [--note TEXT] [--parent ID]          Add a task, or a subtask of ID.
+  list [--all] [--page N]                                       Show pending tasks, 50 per page; --all includes closed ones.
+  start ID                                                      Mark a task as in progress.
+  done ID                                                       Mark a task as done.
+  drop ID                                                       Mark a task as dropped.
+  reopen ID                                                     Move a done or dropped task back to todo.
+  edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]  Change a task's title, due date or note.
 ")
 
 (defn- error-message [{:error/keys [code details]}]
@@ -25,6 +26,8 @@ Commands:
     :task/illegal-transition  (str "Task " (:id details) " is " (name (:status details)) "; reopen it first.")
     :validation/bad-id        (str "'" (:input details) "' is not a task id.")
     :validation/missing-title "A task needs a title."
+    :validation/nothing-to-edit "Nothing to change. Pass --title, --due, --note or --clear-due."
+    :validation/conflicting-flags "--due and --clear-due can't be used together."
     :validation/bad-date      (str "Can't read date '" (:input details)
                                    "'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.")
     :validation/bad-page      "--page needs a number."
@@ -88,6 +91,21 @@ Commands:
             {:exit 0 :out (str "Task " (:id task) " " (get-in transition-messages [command outcome]) ".\n") :err ""}))))
     (fallback parsed)))
 
+(defn- edit [components {:keys [opts] :as parsed}]
+  (if-let [id-arg (:id opts)]
+    (let [id      (adapters.task/parse-id id-arg)
+          today   (.toLocalDate ((:clock components)))
+          changes (when-not (:error/code id) (adapters.task/args->changes opts today))]
+      (cond
+        (:error/code id)      (error-result id)
+        (:error/code changes) (error-result changes)
+        :else
+        (let [task (controllers.task/edit! id changes components)]
+          (if (:error/code task)
+            (error-result task)
+            {:exit 0 :out (str "Updated task " (:id task) ".\n") :err ""}))))
+    (fallback parsed)))
+
 (defn- option-word
   "The option as typed, dashes kept and any `=value` dropped, or nil when the
   word is not an option. A dash before a digit, as in `-1d`, starts a value."
@@ -139,7 +157,11 @@ Commands:
                              {:cmds       ["reopen"]
                               :fn         (partial transition components :reopen)
                               :args->opts [:id]
-                              :coerce     {:id :string}}])
+                              :coerce     {:id :string}}
+                             {:cmds       ["edit"]
+                              :fn         (partial edit components)
+                              :args->opts [:id]
+                              :coerce     {:id :string :title :string :due :string :note :string :clear-due :boolean}}])
                       {:cmds [] :fn fallback})
                 argv))
 

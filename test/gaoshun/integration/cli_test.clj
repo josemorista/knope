@@ -637,18 +637,27 @@
     (is (= before (rows)))))
 
 (deftest help-prints-the-usage-with-descriptions-in-one-column
-  (is (= {:exit 0
-          :out  (str "Usage: gaoshun <command> [options]\n"
-                     "\n"
-                     "Commands:\n"
-                     "  add <title> [--due DATE] [--note TEXT] [--parent ID]  Add a task, or a subtask of ID.\n"
-                     "  list [--all] [--page N]                               Show pending tasks, 50 per page; --all includes closed ones.\n"
-                     "  start ID                                              Mark a task as in progress.\n"
-                     "  done ID                                               Mark a task as done.\n"
-                     "  drop ID                                               Mark a task as dropped.\n"
-                     "  reopen ID                                             Move a done or dropped task back to todo.\n")
-          :err  ""}
-         (run "--help"))))
+  (let [{:keys [exit out err]} (run "--help")
+        [header blank commands & lines] (str/split-lines out)
+        entries (for [line lines
+                      :let [[_ synopsis gap description] (re-find #"^  (\S.*?)( {2,})(\S.*)$" line)]]
+                  {:synopsis synopsis :description description :column (+ 2 (count synopsis) (count gap))})
+        column (+ 2 (apply max (map (comp count :synopsis) entries)) 2)]
+    (is (= 0 exit))
+    (is (= "" err))
+    (is (= ["Usage: gaoshun <command> [options]" "" "Commands:"] [header blank commands]))
+    (is (= (count lines) (count entries)) "every command line has a synopsis and a description")
+    (is (every? #(= column (:column %)) entries) "descriptions start at one column, two spaces past the longest synopsis")
+    (is (= {"add <title> [--due DATE] [--note TEXT] [--parent ID]" "Add a task, or a subtask of ID."
+            "list [--all] [--page N]"                              "Show pending tasks, 50 per page; --all includes closed ones."
+            "start ID"                                             "Mark a task as in progress."
+            "done ID"                                              "Mark a task as done."
+            "drop ID"                                              "Mark a task as dropped."
+            "reopen ID"                                            "Move a done or dropped task back to todo."}
+           (into {} (map (juxt :synopsis :description))
+                 (remove #(str/starts-with? (:synopsis %) "edit") entries))))
+    (is (= ["edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]"]
+           (map :synopsis (filter #(str/starts-with? (:synopsis %) "edit") entries))))))
 
 (deftest list-renders-a-dimmed-context-row-dim-as-a-whole-with-no-urgency-color
   (insert! {:title "Closed parent" :status :done :due-date (LocalDate/of 2026 9 26)})
@@ -661,3 +670,165 @@
     (is (not (str/includes? parent "\u001b[31m")))
     (is (= (str "\u001b[2m" plain-parent "\u001b[0m") parent))
     (is (= plain (str/replace colored ansi "")))))
+
+(defn- edit-seed!
+  "Stores a doing task with a note and a due date, so an edit shows which
+  fields it leaves alone."
+  []
+  (insert! {:title "Write report" :note "old note" :status :doing :due-date (LocalDate/of 2026 10 5)}))
+
+(defn- edit-row
+  "The stored row of the task made by edit-seed!, with the given columns replaced."
+  [changes]
+  (merge {:id          1
+          :parent_id   nil
+          :title       "Write report"
+          :note        "old note"
+          :status      "doing"
+          :created_at  "2026-09-28T12:00:00"
+          :due_date    "2026-10-05"
+          :finish_date nil}
+         changes))
+
+(def ^:private updated-task-1 {:exit 0 :out "Updated task 1.\n" :err ""})
+
+(deftest edit-changes-the-title-and-leaves-every-other-field
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "1" "--title" "new name")))
+  (is (= [(edit-row {:title "new name"})] (rows))))
+
+(deftest edit-changes-the-due-date
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "1" "--due" "tomorrow")))
+  (is (= [(edit-row {:due_date "2026-09-29"})] (rows))))
+
+(deftest edit-sets-a-due-date-on-a-task-without-one
+  (insert! {})
+  (is (= updated-task-1 (run "edit" "1" "--due" "2026-11-01")))
+  (is (= [(assoc (task-row "todo" nil) :due_date "2026-11-01")] (rows))))
+
+(deftest edit-changes-the-note
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "1" "--note" "buy milk")))
+  (is (= [(edit-row {:note "buy milk"})] (rows))))
+
+(deftest edit-with-an-empty-note-clears-the-note
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "1" "--note" "")))
+  (is (= [(edit-row {:note nil})] (rows))))
+
+(deftest edit-with-clear-due-removes-the-due-date
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "1" "--clear-due")))
+  (is (= [(edit-row {:due_date nil})] (rows))))
+
+(deftest edit-applies-several-options-at-once
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "1" "--title" "new name" "--note" "" "--clear-due")))
+  (is (= [(edit-row {:title "new name" :note nil :due_date nil})] (rows)))
+  (is (= updated-task-1 (run "edit" "1" "--due" "+3d" "--note" "later")))
+  (is (= [(edit-row {:title "new name" :note "later" :due_date "2026-10-01"})] (rows))))
+
+(deftest edit-takes-the-options-before-the-id
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "--title" "new name" "1")))
+  (is (= [(edit-row {:title "new name"})] (rows))))
+
+(deftest edit-accepts-a-negative-offset-as-a-due-value
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "1" "--due" "-2d")))
+  (is (= [(edit-row {:due_date "2026-09-26"})] (rows))))
+
+(deftest edit-leaves-status-finish-date-parent-and-other-tasks-alone
+  (insert! {:title "Parent"})
+  (insert! {:title "Step" :parent-id 1 :status :done :note "n" :due-date (LocalDate/of 2026 10 5)})
+  (insert! {:title "Other"})
+  (let [[parent _ other] (rows)]
+    (is (= {:exit 0 :out "Updated task 2.\n" :err ""} (run "edit" "2" "--title" "Renamed step")))
+    (is (= [parent
+            {:id          2
+             :parent_id   1
+             :title       "Renamed step"
+             :note        "n"
+             :status      "done"
+             :created_at  "2026-09-28T12:00:00"
+             :due_date    "2026-10-05"
+             :finish_date "2026-09-28"}
+            other]
+           (rows)))))
+
+(deftest edit-with-no-options-is-refused-and-changes-nothing
+  (edit-seed!)
+  (let [before (rows)]
+    (is (= {:exit 1 :out "" :err "Nothing to change. Pass --title, --due, --note or --clear-due.\n"}
+           (run "edit" "1")))
+    (is (= before (rows)))))
+
+(deftest edit-with-a-due-date-and-clear-due-is-refused-and-changes-nothing
+  (edit-seed!)
+  (let [before (rows)]
+    (is (= {:exit 1 :out "" :err "--due and --clear-due can't be used together.\n"}
+           (run "edit" "1" "--due" "tomorrow" "--clear-due")))
+    (is (= {:exit 1 :out "" :err "--due and --clear-due can't be used together.\n"}
+           (run "edit" "1" "--clear-due" "--title" "new name" "--due" "2026-11-01")))
+    (is (= before (rows)))))
+
+(deftest edit-with-a-blank-title-is-refused-and-changes-nothing
+  (edit-seed!)
+  (let [before (rows)]
+    (doseq [title ["" "   "]]
+      (testing (pr-str title)
+        (is (= {:exit 1 :out "" :err "A task needs a title.\n"}
+               (run "edit" "1" "--title" title)))))
+    (is (= before (rows)))))
+
+(deftest edit-with-an-unreadable-date-is-refused-and-changes-nothing
+  (edit-seed!)
+  (let [before (rows)]
+    (is (= {:exit 1
+            :out  ""
+            :err  "Can't read date 'fri'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.\n"}
+           (run "edit" "1" "--due" "fri")))
+    (is (= before (rows)))))
+
+(deftest edit-with-an-unquoted-multi-word-value-is-refused-and-changes-nothing
+  (edit-seed!)
+  (let [before (rows)]
+    (is (= (extra-argument "name") (run "edit" "1" "--title" "new" "name")))
+    (is (= (extra-argument "milk") (run "edit" "1" "--note" "buy" "milk")))
+    (is (= before (rows)))))
+
+(deftest edit-with-an-unknown-option-is-refused-and-changes-nothing
+  (edit-seed!)
+  (let [before (rows)]
+    (is (= (unknown-option "bogus") (run "edit" "1" "--bogus" "x")))
+    (is (= (unknown-option "parent") (run "edit" "1" "--parent" "2")))
+    (is (= (unknown-option "status") (run "edit" "1" "--status" "done")))
+    (is (= before (rows)))))
+
+(deftest edit-reports-the-shape-before-any-value
+  (edit-seed!)
+  (let [before (rows)]
+    (is (= (unknown-option "bogus") (run "edit" "1" "--title" "" "--bogus" "x")))
+    (is (= (extra-argument "milk") (run "edit" "1" "--due" "fri" "--note" "buy" "milk")))
+    (is (= (extra-argument "4") (run "edit" "abc" "--title" "x" "4")))
+    (is (= before (rows)))))
+
+(deftest edit-on-an-unknown-id-fails
+  (edit-seed!)
+  (let [before (rows)]
+    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "edit" "99" "--title" "x")))
+    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "edit" "99" "--clear-due")))
+    (is (= before (rows)))))
+
+(deftest edit-with-a-bad-id-fails
+  (edit-seed!)
+  (let [before (rows)]
+    (doseq [input ["abc" "0" "-1"]]
+      (testing input
+        (is (= {:exit 1 :out "" :err (str "'" input "' is not a task id.\n")}
+               (run "edit" input "--title" "x")))))
+    (is (= before (rows)))))
+
+(deftest edit-without-an-id-prints-usage-and-exits-one
+  (is (= {:exit 1 :out "" :err @#'cli/usage} (run "edit"))))

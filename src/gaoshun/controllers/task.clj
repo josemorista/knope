@@ -21,6 +21,14 @@
       result)
     {:error/code :task/not-found :error/details {:id id}}))
 
+(defn edit!
+  [id changes {:keys [sqlite]}]
+  (if-let [task (sqlite.task/find-by-id id sqlite)]
+    (let [edited (logic.task/apply-edit task changes)]
+      (sqlite.task/update! edited sqlite)
+      edited)
+    {:error/code :task/not-found :error/details {:id id}}))
+
 (def ^:private page-size 50)
 
 (defn list-tasks

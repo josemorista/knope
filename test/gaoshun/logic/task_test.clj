@@ -104,6 +104,31 @@
   (is (invariant-violation?
        #(logic.task/new-task {:parent-id nil :title " " :note nil :due-date nil} now))))
 
+(deftest apply-edit-changes-the-title
+  (is (= (assoc valid-attrs :title "new name")
+         (logic.task/apply-edit valid-attrs {:title "new name"}))))
+
+(deftest apply-edit-changes-the-due-date
+  (is (= (assoc valid-attrs :due-date (LocalDate/of 2026 11 1))
+         (logic.task/apply-edit valid-attrs {:due-date (LocalDate/of 2026 11 1)}))))
+
+(deftest apply-edit-clears-the-due-date-and-the-note
+  (is (= (assoc valid-attrs :due-date nil)
+         (logic.task/apply-edit valid-attrs {:due-date nil})))
+  (is (= (assoc valid-attrs :note nil)
+         (logic.task/apply-edit valid-attrs {:note nil}))))
+
+(deftest apply-edit-changes-the-note
+  (is (= (assoc valid-attrs :note "new")
+         (logic.task/apply-edit valid-attrs {:note "new"}))))
+
+(deftest apply-edit-leaves-status-and-finish-date-alone
+  (let [done (assoc valid-attrs :status :done :finish-date today)]
+    (is (= (assoc done :title "x") (logic.task/apply-edit done {:title "x"})))))
+
+(deftest apply-edit-rejects-a-blank-title
+  (is (invariant-violation? #(logic.task/apply-edit valid-attrs {:title " "}))))
+
 (defn- tasks-of
   "The tasks of a build-tree result, in order. Entry shape is not fixed by the
   spec beyond leaving room for :children and :context?, so accept either a

@@ -42,6 +42,29 @@
        :due-date  due-date
        :parent-id parent-id})))
 
+(defn args->changes
+  [{:keys [title due note clear-due]} today]
+  (let [due-date (when due (logic.date/parse-date-input due today))]
+    (cond
+      (and (nil? title) (nil? due) (nil? note) (not clear-due))
+      {:error/code :validation/nothing-to-edit :error/details {}}
+
+      (and due clear-due)
+      {:error/code :validation/conflicting-flags :error/details {}}
+
+      (and title (str/blank? title))
+      {:error/code :validation/missing-title :error/details {}}
+
+      (and due (nil? due-date))
+      {:error/code :validation/bad-date :error/details {:input due}}
+
+      :else
+      (cond-> {}
+        title            (assoc :title title)
+        due              (assoc :due-date due-date)
+        clear-due        (assoc :due-date nil)
+        (some? note)     (assoc :note (when-not (= "" note) note))))))
+
 (defn row->task
   [{:keys [id parent_id title note status created_at due_date finish_date]}]
   (logic.task/make-task {:id          id
