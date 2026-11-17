@@ -29,6 +29,18 @@
       edited)
     {:error/code :task/not-found :error/details {:id id}}))
 
+(defn remove!
+  "Deletes task id. A parent with subtasks is refused unless force?, which
+  deletes the family. Returns the id and how many subtasks went with it."
+  [id force? {:keys [sqlite]}]
+  (if (sqlite.task/find-by-id id sqlite)
+    (let [subtasks (sqlite.task/count-children id sqlite)]
+      (if (and (pos? subtasks) (not force?))
+        {:error/code :task/has-subtasks :error/details {:id id :count subtasks}}
+        (do (sqlite.task/delete! id sqlite)
+            {:id id :subtasks subtasks})))
+    {:error/code :task/not-found :error/details {:id id}}))
+
 (def ^:private page-size 50)
 
 (defn list-tasks

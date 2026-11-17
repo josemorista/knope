@@ -17,12 +17,16 @@ Commands:
   drop ID                                                       Mark a task as dropped.
   reopen ID                                                     Move a done or dropped task back to todo.
   edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]  Change a task's title, due date or note.
+  rm ID [--force]                                               Delete a task; --force also deletes its subtasks.
 ")
 
 (defn- error-message [{:error/keys [code details]}]
   (case code
     :task/not-found           (str "Task " (:id details) " not found.")
     :task/nesting-too-deep    (str "Task " (:id details) " is a subtask; subtasks can't have subtasks.")
+    :task/has-subtasks        (let [n (:count details)]
+                                (str "Task " (:id details) " has " n (if (= 1 n) " subtask" " subtasks")
+                                     ". Use --force to delete " (if (= 1 n) "it" "them") " too."))
     :task/illegal-transition  (str "Task " (:id details) " is " (name (:status details)) "; reopen it first.")
     :validation/bad-id        (str "'" (:input details) "' is not a task id.")
     :validation/missing-title "A task needs a title."
@@ -106,6 +110,22 @@ Commands:
             {:exit 0 :out (str "Updated task " (:id task) ".\n") :err ""}))))
     (fallback parsed)))
 
+(defn- rm [components {:keys [opts] :as parsed}]
+  (if-let [id-arg (:id opts)]
+    (let [id (adapters.task/parse-id id-arg)]
+      (if (:error/code id)
+        (error-result id)
+        (let [{:keys [subtasks] :as result} (controllers.task/remove! id (boolean (:force opts)) components)]
+          (if (:error/code result)
+            (error-result result)
+            {:exit 0
+             :out  (str "Deleted task " id
+                        (when (pos? subtasks)
+                          (str " and " subtasks (if (= 1 subtasks) " subtask" " subtasks")))
+                        ".\n")
+             :err  ""}))))
+    (fallback parsed)))
+
 (defn- option-word
   "The option as typed, dashes kept and any `=value` dropped, or nil when the
   word is not an option. A dash before a digit, as in `-1d`, starts a value."
@@ -161,7 +181,11 @@ Commands:
                              {:cmds       ["edit"]
                               :fn         (partial edit components)
                               :args->opts [:id]
-                              :coerce     {:id :string :title :string :due :string :note :string :clear-due :boolean}}])
+                              :coerce     {:id :string :title :string :due :string :note :string :clear-due :boolean}}
+                             {:cmds       ["rm"]
+                              :fn         (partial rm components)
+                              :args->opts [:id]
+                              :coerce     {:id :string :force :boolean}}])
                       {:cmds [] :fn fallback})
                 argv))
 

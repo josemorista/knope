@@ -176,3 +176,54 @@
     (sqlite.task/update! (assoc first-task :status :doing) (db))
     (is (= other (sqlite.task/find-by-id (:id other) (db))))
     (is (= (assoc first-task :status :doing) (sqlite.task/find-by-id (:id first-task) (db))))))
+
+(deftest count-children-counts-only-the-direct-subtasks-of-a-task
+  (insert-all! [(gen.task/task {:id nil :title "Parent"})
+                (gen.task/task {:id nil :title "Other parent"})
+                (gen.task/task {:id nil :title "Step one" :parent-id 1})
+                (gen.task/task {:id nil :title "Step two" :parent-id 1 :status :done})
+                (gen.task/task {:id nil :title "Other step" :parent-id 2})])
+  (is (= 2 (sqlite.task/count-children 1 (db))))
+  (is (= 1 (sqlite.task/count-children 2 (db))))
+  (is (= 0 (sqlite.task/count-children 3 (db))))
+  (is (= 0 (sqlite.task/count-children 99 (db)))))
+
+(deftest delete-removes-a-parent-and-both-its-children-in-one-call
+  (let [[_ _ _ _ _ other-parent other-step unrelated]
+        (insert-all! [(gen.task/task {:id nil :title "Quarterly parent"})
+                      (gen.task/task {:id nil :title "Quarterly first step" :parent-id 1})
+                      (gen.task/task {:id nil :title "Quarterly second step" :parent-id 1
+                                      :note "quarterly note" :status :done})
+                      (gen.task/task {:id nil :title "Quarterly sibling parent"})
+                      (gen.task/task {:id nil :title "Quarterly sibling step" :parent-id 4})
+                      (gen.task/task {:id nil :title "Annual parent"})
+                      (gen.task/task {:id nil :title "Annual step" :parent-id 6})
+                      (gen.task/task {:id nil :title "Unrelated"})])]
+    (sqlite.task/delete! 1 (db))
+    (is (nil? (sqlite.task/find-by-id 1 (db))))
+    (is (nil? (sqlite.task/find-by-id 2 (db))))
+    (is (nil? (sqlite.task/find-by-id 3 (db))))
+    (is (= [4 5 6 7 8] (mapv :id (sqlite/query (db) ["SELECT id FROM tasks ORDER BY id"]))))
+    (is (= other-parent (sqlite.task/find-by-id 6 (db))))
+    (is (= other-step (sqlite.task/find-by-id 7 (db))))
+    (is (= unrelated (sqlite.task/find-by-id 8 (db))))))
+
+(deftest delete-removes-the-family-from-the-search-index
+  (insert-all! [(gen.task/task {:id nil :title "Quarterly parent"})
+                (gen.task/task {:id nil :title "Quarterly first step" :parent-id 1})
+                (gen.task/task {:id nil :title "Second step" :parent-id 1 :note "quarterly note"})
+                (gen.task/task {:id nil :title "Quarterly sibling"})])
+  (is (= [{:rowid 1} {:rowid 2} {:rowid 3} {:rowid 4}]
+         (sqlite/query (db) ["SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH ? ORDER BY rowid" "quarterly*"])))
+  (sqlite.task/delete! 1 (db))
+  (is (= [{:rowid 4}]
+         (sqlite/query (db) ["SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH ? ORDER BY rowid" "quarterly*"]))))
+
+(deftest delete-of-a-subtask-leaves-its-parent-and-sibling
+  (let [[parent _ sibling] (insert-all! [(gen.task/task {:id nil :title "Parent"})
+                                         (gen.task/task {:id nil :title "Step one" :parent-id 1})
+                                         (gen.task/task {:id nil :title "Step two" :parent-id 1})])]
+    (sqlite.task/delete! 2 (db))
+    (is (nil? (sqlite.task/find-by-id 2 (db))))
+    (is (= parent (sqlite.task/find-by-id 1 (db))))
+    (is (= sibling (sqlite.task/find-by-id 3 (db))))))

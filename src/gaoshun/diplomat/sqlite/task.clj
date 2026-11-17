@@ -63,3 +63,13 @@ VALUES (?, ?, ?, ?, ?, ?, ?)"]
 created_at = ?, due_date = ?, finish_date = ? WHERE id = ?"]
                          (conj (adapters.task/task->params task) id)))
   nil)
+
+(defn count-children
+  [id db-path]
+  (:n (first (sqlite/query db-path ["SELECT COUNT(*) AS n FROM tasks WHERE parent_id = ?" id]))))
+
+(defn delete!
+  "Deletes task id and every subtask of it in one statement."
+  [id db-path]
+  (sqlite/execute! db-path ["DELETE FROM tasks WHERE id = ? OR parent_id = ?" id id])
+  nil)

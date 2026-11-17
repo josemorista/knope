@@ -655,9 +655,13 @@
             "drop ID"                                              "Mark a task as dropped."
             "reopen ID"                                            "Move a done or dropped task back to todo."}
            (into {} (map (juxt :synopsis :description))
-                 (remove #(str/starts-with? (:synopsis %) "edit") entries))))
+                 (remove #(re-find #"^(edit|rm)\b" (:synopsis %)) entries))))
     (is (= ["edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]"]
-           (map :synopsis (filter #(str/starts-with? (:synopsis %) "edit") entries))))))
+           (map :synopsis (filter #(str/starts-with? (:synopsis %) "edit") entries))))
+    (is (= ["rm ID [--force]"]
+           (map :synopsis (filter #(str/starts-with? (:synopsis %) "rm") entries))))
+    (is (every? (complement str/blank?)
+                (map :description (filter #(str/starts-with? (:synopsis %) "rm") entries))))))
 
 (deftest list-renders-a-dimmed-context-row-dim-as-a-whole-with-no-urgency-color
   (insert! {:title "Closed parent" :status :done :due-date (LocalDate/of 2026 9 26)})
@@ -832,3 +836,106 @@
 
 (deftest edit-without-an-id-prints-usage-and-exits-one
   (is (= {:exit 1 :out "" :err @#'cli/usage} (run "edit"))))
+
+(defn- seed-family!
+  "Two other tasks (the first with a subtask), then task 3 with n subtasks, then an unrelated task.
+  Returns the stored rows."
+  [n]
+  (insert! {:title "Other parent"})
+  (insert! {:title "Other step" :parent-id 1 :note "keep me" :due-date (LocalDate/of 2026 10 5)})
+  (insert! {:title "Parent" :status :doing})
+  (dotimes [i n]
+    (insert! {:title (str "Step " (inc i)) :parent-id 3 :status (if (even? i) :todo :done)}))
+  (insert! {:title "Unrelated" :due-date (LocalDate/of 2026 10 1)})
+  (rows))
+
+(defn- without-family
+  "The rows left once task 3 and its subtasks are gone."
+  [before]
+  (vec (remove #(or (= 3 (:id %)) (= 3 (:parent_id %))) before)))
+
+(deftest rm-deletes-a-task-without-subtasks
+  (insert! {:title "Keep" :note "n"})
+  (insert! {:title "Typo"})
+  (insert! {:title "Also keep" :due-date (LocalDate/of 2026 10 1)})
+  (let [[keep _ also-keep] (rows)]
+    (is (= {:exit 0 :out "Deleted task 2.\n" :err ""} (run "rm" "2")))
+    (is (= [keep also-keep] (rows)))))
+
+(deftest rm-deletes-the-only-task
+  (insert! {})
+  (is (= {:exit 0 :out "Deleted task 1.\n" :err ""} (run "rm" "1")))
+  (is (= [] (rows))))
+
+(deftest rm-deletes-one-subtask-and-leaves-its-parent-and-siblings
+  (let [before (seed-family! 2)]
+    (is (= 6 (count before)))
+    (is (= {:exit 0 :out "Deleted task 4.\n" :err ""} (run "rm" "4")))
+    (is (= (vec (remove #(= 4 (:id %)) before)) (rows)))))
+
+(deftest rm-of-a-parent-without-force-is-refused-and-deletes-nothing
+  (let [before (seed-family! 2)]
+    (is (= 6 (count before)))
+    (is (= {:exit 1 :out "" :err "Task 3 has 2 subtasks. Use --force to delete them too.\n"}
+           (run "rm" "3")))
+    (is (= before (rows)))))
+
+(deftest rm-of-a-parent-with-one-subtask-reads-in-the-singular
+  (let [before (seed-family! 1)]
+    (is (= 5 (count before)))
+    (is (= {:exit 1 :out "" :err "Task 3 has 1 subtask. Use --force to delete it too.\n"}
+           (run "rm" "3")))
+    (is (= before (rows)))))
+
+(deftest rm-of-a-parent-with-an-all-closed-family-still-needs-force
+  (insert! {:title "Parent" :status :done})
+  (insert! {:title "Step" :parent-id 1 :status :dropped})
+  (let [before (rows)]
+    (is (= {:exit 1 :out "" :err "Task 1 has 1 subtask. Use --force to delete it too.\n"}
+           (run "rm" "1")))
+    (is (= before (rows)))))
+
+(deftest rm-with-force-after-the-id-deletes-the-parent-and-its-subtasks
+  (let [before (seed-family! 2)]
+    (is (= {:exit 0 :out "Deleted task 3 and 2 subtasks.\n" :err ""} (run "rm" "3" "--force")))
+    (is (= (without-family before) (rows)))
+    (is (= [1 2 6] (mapv :id (rows))))))
+
+(deftest rm-with-force-before-the-id-deletes-the-parent-and-its-subtasks
+  (let [before (seed-family! 2)]
+    (is (= {:exit 0 :out "Deleted task 3 and 2 subtasks.\n" :err ""} (run "rm" "--force" "3")))
+    (is (= (without-family before) (rows)))
+    (is (= [1 2 6] (mapv :id (rows))))))
+
+(deftest forced-rm-of-a-parent-with-one-subtask-reads-in-the-singular
+  (doseq [argv [["rm" "3" "--force"] ["rm" "--force" "3"]]]
+    (testing (pr-str argv)
+      (sqlite/execute! helpers/*db-path* ["DELETE FROM tasks"])
+      (sqlite/execute! helpers/*db-path* ["DELETE FROM sqlite_sequence WHERE name = 'tasks'"])
+      (let [before (seed-family! 1)]
+        (is (= 5 (count before)))
+        (is (= {:exit 0 :out "Deleted task 3 and 1 subtask.\n" :err ""} (apply run argv)))
+        (is (= (without-family before) (rows)))
+        (is (= [1 2 5] (mapv :id (rows))))))))
+
+(deftest forced-rm-of-a-task-without-subtasks-deletes-just-that-task
+  (let [before (seed-family! 0)]
+    (is (= 4 (count before)))
+    (is (= {:exit 0 :out "Deleted task 3.\n" :err ""} (run "rm" "3" "--force")))
+    (is (= (without-family before) (rows)))))
+
+(deftest rm-on-an-unknown-id-fails-and-deletes-nothing
+  (let [before (seed-family! 2)]
+    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "rm" "99")))
+    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "rm" "99" "--force")))
+    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "rm" "--force" "99")))
+    (is (= before (rows)))))
+
+(deftest every-command-that-takes-an-id-says-not-found-for-a-missing-task
+  (insert! {})
+  (let [before (rows)]
+    (doseq [argv [["start" "99"] ["done" "99"] ["drop" "99"] ["reopen" "99"]
+                  ["edit" "99" "--title" "x"] ["rm" "99"]]]
+      (testing (pr-str argv)
+        (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (apply run argv)))))
+    (is (= before (rows)))))
