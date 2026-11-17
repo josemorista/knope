@@ -532,3 +532,106 @@
   (doseq [command ["start" "done" "drop" "reopen"]]
     (testing command
       (is (= {:exit 1 :out "" :err @#'cli/usage} (run command))))))
+
+(defn- extra-argument [input]
+  {:exit 1 :out "" :err (str "Unexpected argument '" input "'. Put text with spaces in quotes.\n")})
+
+(defn- unknown-option [option]
+  {:exit 1 :out "" :err (str "Unknown option '--" option "'.\n")})
+
+(deftest add-with-an-unquoted-multi-word-title-is-refused
+  (is (= (extra-argument "milk") (run "add" "buy" "milk")))
+  (is (= (extra-argument "y") (run "add" "x" "y" "z")))
+  (is (empty? (rows))))
+
+(deftest add-with-an-unquoted-multi-word-note-is-refused
+  (is (= (extra-argument "milk") (run "add" "x" "--note" "buy" "milk")))
+  (is (empty? (rows))))
+
+(deftest add-with-quoted-multi-word-text-stores-it-whole
+  (is (= {:exit 0 :out "Added task 1.\n" :err ""} (run "add" "buy milk")))
+  (is (= {:exit 0 :out "Added task 2.\n" :err ""} (run "add" "x" "--note" "buy milk")))
+  (is (= ["buy milk" "x"] (map :title (rows))))
+  (is (= [nil "buy milk"] (map :note (rows)))))
+
+(deftest list-with-an-extra-word-is-refused
+  (insert! {:title "Open one"})
+  (is (= (extra-argument "extra") (run "list" "extra"))))
+
+(deftest a-transition-with-an-extra-word-is-refused-and-changes-nothing
+  (insert! {:title "One"})
+  (insert! {:title "Two"})
+  (insert! {:title "Three"})
+  (doseq [command ["start" "done" "drop" "reopen"]]
+    (testing command
+      (is (= (extra-argument "4") (run command "3" "4")))))
+  (is (= ["todo" "todo" "todo"] (map :status (rows)))))
+
+(deftest add-with-an-unknown-option-is-refused
+  (is (= (unknown-option "bogus") (run "add" "x" "--bogus" "y")))
+  (is (= (unknown-option "title") (run "add" "--title" "x" "y")))
+  (is (empty? (rows))))
+
+(deftest a-transition-with-an-unknown-option-is-refused-and-changes-nothing
+  (insert! {:title "One"})
+  (insert! {:title "Two"})
+  (insert! {:title "Three"})
+  (doseq [command ["start" "done" "drop" "reopen"]]
+    (testing command
+      (is (= (unknown-option "bogus") (run command "--bogus" "x" "3")))))
+  (is (= ["todo" "todo" "todo"] (map :status (rows)))))
+
+(deftest list-with-an-unknown-option-is-refused
+  (insert! {:title "Open one"})
+  (is (= (unknown-option "bogus") (run "list" "--bogus"))))
+
+(deftest only-the-top-level-accepts-help
+  (is (= (unknown-option "help") (run "add" "--help")))
+  (is (= (unknown-option "help") (run "list" "--help")))
+  (is (= 0 (:exit (run "--help")))))
+
+(deftest the-shape-is-checked-before-any-value
+  (insert! {:title "One"})
+  (testing "an unknown option is reported before a blank title"
+    (is (= (unknown-option "bogus") (run "add" "" "--bogus" "y"))))
+  (testing "an unknown option is reported before an unreadable date"
+    (is (= (unknown-option "bogus") (run "add" "x" "--due" "fri" "--bogus" "y"))))
+  (testing "an extra word is reported before an unreadable date"
+    (is (= (extra-argument "y") (run "add" "x" "y" "--due" "fri"))))
+  (testing "an extra word is reported before a bad parent"
+    (is (= (extra-argument "y") (run "add" "x" "y" "--parent" "abc"))))
+  (testing "an unknown option is reported before an extra word"
+    (is (= (unknown-option "bogus") (run "add" "buy" "milk" "--bogus" "y"))))
+  (testing "an extra word is reported before a bad id"
+    (is (= (extra-argument "4") (run "done" "abc" "4"))))
+  (testing "an unknown option is reported before a bad id"
+    (is (= (unknown-option "bogus") (run "done" "--bogus" "abc"))))
+  (testing "an extra word is reported before a bad page"
+    (is (= (extra-argument "extra") (run "list" "--page" "abc" "extra"))))
+  (is (= ["One"] (map :title (rows)))))
+
+(deftest help-prints-the-usage-with-descriptions-in-one-column
+  (is (= {:exit 0
+          :out  (str "Usage: gaoshun <command> [options]\n"
+                     "\n"
+                     "Commands:\n"
+                     "  add <title> [--due DATE] [--note TEXT] [--parent ID]  Add a task, or a subtask of ID.\n"
+                     "  list [--all] [--page N]                               Show pending tasks, 50 per page; --all includes closed ones.\n"
+                     "  start ID                                              Mark a task as in progress.\n"
+                     "  done ID                                               Mark a task as done.\n"
+                     "  drop ID                                               Mark a task as dropped.\n"
+                     "  reopen ID                                             Move a done or dropped task back to todo.\n")
+          :err  ""}
+         (run "--help"))))
+
+(deftest list-renders-a-dimmed-context-row-dim-as-a-whole-with-no-urgency-color
+  (insert! {:title "Closed parent" :status :done :due-date (LocalDate/of 2026 9 26)})
+  (insert! {:title "Open step" :parent-id 1})
+  (let [plain   (:out (run "list"))
+        colored (:out (cli/run helpers/*components* {:color? true} ["list"]))
+        parent  (or (first (filter #(str/includes? % "Closed parent") (str/split-lines colored))) "")
+        plain-parent (or (first (filter #(str/includes? % "Closed parent") (str/split-lines plain))) "")]
+    (is (str/includes? plain-parent "2d overdue"))
+    (is (not (str/includes? parent "\u001b[31m")))
+    (is (= (str "\u001b[2m" plain-parent "\u001b[0m") parent))
+    (is (= plain (str/replace colored ansi "")))))
