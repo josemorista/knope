@@ -3,6 +3,8 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [gaoshun.components :as components]
             [gaoshun.diplomat.sqlite.db :as db]
+            [gaoshun.diplomat.sqlite.task :as sqlite.task]
+            [gaoshun.gen.task :as gen.task]
             [gaoshun.helpers :as helpers]
             [pod.babashka.go-sqlite3 :as sqlite]))
 
@@ -80,6 +82,28 @@
   (is (= [{:rowid 1}]
          (sqlite/query helpers/*db-path*
                        ["SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH ?" "quarterly*"]))))
+
+(defn- fts-rowids [match]
+  (sqlite/query helpers/*db-path*
+                ["SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH ?" match]))
+
+(deftest fts-match-folds-diacritics
+  (let [viet (sqlite.task/insert! (gen.task/task {:id nil :title "Việt Nam"}) helpers/*db-path*)
+        auth (sqlite.task/insert! (gen.task/task {:id nil :title "Autenticação"}) helpers/*db-path*)]
+    (is (= [{:rowid viet}] (fts-rowids "\"viet\"*")))
+    (is (= [{:rowid auth}] (fts-rowids "\"autenticacao\"*")))))
+
+(deftest fts-index-follows-a-status-only-update
+  (let [id (sqlite.task/insert! (gen.task/task {:id nil :title "Write quarterly report"}) helpers/*db-path*)]
+    (sqlite.task/update! (gen.task/task {:id id :title "Write quarterly report" :status :doing})
+                         helpers/*db-path*)
+    (is (= [{:rowid id}] (fts-rowids "\"quarterly\"*")))))
+
+(deftest fts-index-follows-a-title-update
+  (let [id (sqlite.task/insert! (gen.task/task {:id nil :title "Write quarterly report"}) helpers/*db-path*)]
+    (sqlite.task/update! (gen.task/task {:id id :title "Write annual summary"}) helpers/*db-path*)
+    (is (= [] (fts-rowids "\"quarterly\"*")))
+    (is (= [{:rowid id}] (fts-rowids "\"annual\"*")))))
 
 (deftest ensure-schema-twice-is-a-no-op
   (let [before (snapshot helpers/*db-path*)]

@@ -10,12 +10,12 @@
   "Usage: gaoshun <command> [options]
 
 Commands:
-  add <title> [--due DATE] [--note TEXT] [--parent ID]   Add a task, or a subtask of ID.
-  list [--all] [--page N]                  Show pending tasks, 50 per page; --all includes closed ones.
-  start ID                                 Mark a task as in progress.
-  done ID                                  Mark a task as done.
-  drop ID                                  Mark a task as dropped.
-  reopen ID                                Move a done or dropped task back to todo.
+  add <title> [--due DATE] [--note TEXT] [--parent ID]  Add a task, or a subtask of ID.
+  list [--all] [--page N]                               Show pending tasks, 50 per page; --all includes closed ones.
+  start ID                                              Mark a task as in progress.
+  done ID                                               Mark a task as done.
+  drop ID                                               Mark a task as dropped.
+  reopen ID                                             Move a done or dropped task back to todo.
 ")
 
 (defn- error-message [{:error/keys [code details]}]
@@ -28,7 +28,10 @@ Commands:
     :validation/bad-date      (str "Can't read date '" (:input details)
                                    "'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.")
     :validation/bad-page      "--page needs a number."
-    :validation/missing-value (str "--" (:option details) " needs a value.")))
+    :validation/missing-value (str "--" (:option details) " needs a value.")
+    :validation/unknown-option (str "Unknown option '" (:option details) "'.")
+    :validation/extra-argument (str "Unexpected argument '" (:input details)
+                                    "'. Put text with spaces in quotes.")))
 
 (defn- error-result [error]
   {:exit 1 :out "" :err (str (error-message error) "\n")})
@@ -85,31 +88,59 @@ Commands:
             {:exit 0 :out (str "Task " (:id task) " " (get-in transition-messages [command outcome]) ".\n") :err ""}))))
     (fallback parsed)))
 
+(defn- option-word
+  "The option as typed, dashes kept and any `=value` dropped, or nil when the
+  word is not an option. A dash before a digit, as in `-1d`, starts a value."
+  [word]
+  (when (re-find #"^--?[A-Za-z]" word)
+    (first (str/split word #"=" 2))))
+
+(defn- shape-checked
+  "Refuse an option the entry does not define, then a word beyond its
+  positional arguments, before the handler sees any value. Options are read
+  from the raw words: babashka.cli stores `--title x` under the same key as a
+  positional title, and stops reading options at the first extra word."
+  [argv {:keys [cmds coerce args->opts] handler :fn :as entry}]
+  (let [allowed (apply disj (set (keys coerce)) args->opts)]
+    (assoc entry :fn
+           (fn [{:keys [opts args] :as parsed}]
+             (if-let [option (or (some #(when-let [w (option-word %)]
+                                          (when-not (allowed (keyword (str/replace w #"^--?" ""))) w))
+                                       (drop (count cmds) argv))
+                                 (some #(when-not (contains? coerce %) (str "--" (name %))) (keys opts)))]
+               (error-result {:error/code    :validation/unknown-option
+                              :error/details {:option option}})
+               (if (seq args)
+                 (error-result {:error/code    :validation/extra-argument
+                                :error/details {:input (first args)}})
+                 (handler parsed)))))))
+
 (defn- dispatch [components opts argv]
-  (cli/dispatch [{:cmds       ["add"]
-                  :fn         (partial add components)
-                  :args->opts [:title]
-                  :coerce     {:title :string :due :string :note :string :parent :string}}
-                 {:cmds   ["list"]
-                  :fn     (partial list-tasks components opts)
-                  :coerce {:all :boolean :page :string}}
-                 {:cmds       ["start"]
-                  :fn         (partial transition components :start)
-                  :args->opts [:id]
-                  :coerce     {:id :string}}
-                 {:cmds       ["done"]
-                  :fn         (partial transition components :done)
-                  :args->opts [:id]
-                  :coerce     {:id :string}}
-                 {:cmds       ["drop"]
-                  :fn         (partial transition components :drop)
-                  :args->opts [:id]
-                  :coerce     {:id :string}}
-                 {:cmds       ["reopen"]
-                  :fn         (partial transition components :reopen)
-                  :args->opts [:id]
-                  :coerce     {:id :string}}
-                 {:cmds [] :fn fallback}]
+  (cli/dispatch (conj (mapv (partial shape-checked argv)
+                            [{:cmds       ["add"]
+                              :fn         (partial add components)
+                              :args->opts [:title]
+                              :coerce     {:title :string :due :string :note :string :parent :string}}
+                             {:cmds   ["list"]
+                              :fn     (partial list-tasks components opts)
+                              :coerce {:all :boolean :page :string}}
+                             {:cmds       ["start"]
+                              :fn         (partial transition components :start)
+                              :args->opts [:id]
+                              :coerce     {:id :string}}
+                             {:cmds       ["done"]
+                              :fn         (partial transition components :done)
+                              :args->opts [:id]
+                              :coerce     {:id :string}}
+                             {:cmds       ["drop"]
+                              :fn         (partial transition components :drop)
+                              :args->opts [:id]
+                              :coerce     {:id :string}}
+                             {:cmds       ["reopen"]
+                              :fn         (partial transition components :reopen)
+                              :args->opts [:id]
+                              :coerce     {:id :string}}])
+                      {:cmds [] :fn fallback})
                 argv))
 
 (defn- missing-value

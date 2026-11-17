@@ -13,7 +13,7 @@
 (defn- row-line [{:keys [glyph id title progress due-label urgency dimmed?]} indent color?]
   (let [line (cond-> (str indent glyph " " id " " title)
                progress (str "  " progress)
-               due-label (str "  " (colorize due-label urgency color?)))]
+               due-label (str "  " (colorize due-label urgency (and color? (not dimmed?)))))]
     (if (and dimmed? color?)
       (str (:later urgency-colors) line reset)
       line)))
