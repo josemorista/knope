@@ -551,8 +551,23 @@
 (deftest add-with-quoted-multi-word-text-stores-it-whole
   (is (= {:exit 0 :out "Added task 1.\n" :err ""} (run "add" "buy milk")))
   (is (= {:exit 0 :out "Added task 2.\n" :err ""} (run "add" "x" "--note" "buy milk")))
-  (is (= ["buy milk" "x"] (map :title (rows))))
-  (is (= [nil "buy milk"] (map :note (rows)))))
+  (is (= [{:id          1
+           :parent_id   nil
+           :title       "buy milk"
+           :note        nil
+           :status      "todo"
+           :created_at  "2026-09-28T12:00:00"
+           :due_date    nil
+           :finish_date nil}
+          {:id          2
+           :parent_id   nil
+           :title       "x"
+           :note        "buy milk"
+           :status      "todo"
+           :created_at  "2026-09-28T12:00:00"
+           :due_date    nil
+           :finish_date nil}]
+         (rows))))
 
 (deftest list-with-an-extra-word-is-refused
   (insert! {:title "Open one"})
@@ -562,24 +577,34 @@
   (insert! {:title "One"})
   (insert! {:title "Two"})
   (insert! {:title "Three"})
-  (doseq [command ["start" "done" "drop" "reopen"]]
-    (testing command
-      (is (= (extra-argument "4") (run command "3" "4")))))
-  (is (= ["todo" "todo" "todo"] (map :status (rows)))))
+  (let [before (rows)]
+    (doseq [command ["start" "done" "drop" "reopen"]]
+      (testing command
+        (is (= (extra-argument "4") (run command "3" "4")))))
+    (is (= before (rows)))))
 
 (deftest add-with-an-unknown-option-is-refused
   (is (= (unknown-option "bogus") (run "add" "x" "--bogus" "y")))
   (is (= (unknown-option "title") (run "add" "--title" "x" "y")))
   (is (empty? (rows))))
 
+(deftest add-with-an-unknown-short-option-names-it-as-typed
+  (is (= {:exit 1 :out "" :err "Unknown option '-d'.\n"} (run "add" "x" "-d" "today")))
+  (is (empty? (rows))))
+
+(deftest add-with-an-unknown-option-and-value-names-only-the-option
+  (is (= {:exit 1 :out "" :err "Unknown option '--bogus'.\n"} (run "add" "x" "--bogus=1")))
+  (is (empty? (rows))))
+
 (deftest a-transition-with-an-unknown-option-is-refused-and-changes-nothing
   (insert! {:title "One"})
   (insert! {:title "Two"})
   (insert! {:title "Three"})
-  (doseq [command ["start" "done" "drop" "reopen"]]
-    (testing command
-      (is (= (unknown-option "bogus") (run command "--bogus" "x" "3")))))
-  (is (= ["todo" "todo" "todo"] (map :status (rows)))))
+  (let [before (rows)]
+    (doseq [command ["start" "done" "drop" "reopen"]]
+      (testing command
+        (is (= (unknown-option "bogus") (run command "--bogus" "x" "3")))))
+    (is (= before (rows)))))
 
 (deftest list-with-an-unknown-option-is-refused
   (insert! {:title "Open one"})
@@ -592,23 +617,24 @@
 
 (deftest the-shape-is-checked-before-any-value
   (insert! {:title "One"})
-  (testing "an unknown option is reported before a blank title"
-    (is (= (unknown-option "bogus") (run "add" "" "--bogus" "y"))))
-  (testing "an unknown option is reported before an unreadable date"
-    (is (= (unknown-option "bogus") (run "add" "x" "--due" "fri" "--bogus" "y"))))
-  (testing "an extra word is reported before an unreadable date"
-    (is (= (extra-argument "y") (run "add" "x" "y" "--due" "fri"))))
-  (testing "an extra word is reported before a bad parent"
-    (is (= (extra-argument "y") (run "add" "x" "y" "--parent" "abc"))))
-  (testing "an unknown option is reported before an extra word"
-    (is (= (unknown-option "bogus") (run "add" "buy" "milk" "--bogus" "y"))))
-  (testing "an extra word is reported before a bad id"
-    (is (= (extra-argument "4") (run "done" "abc" "4"))))
-  (testing "an unknown option is reported before a bad id"
-    (is (= (unknown-option "bogus") (run "done" "--bogus" "abc"))))
-  (testing "an extra word is reported before a bad page"
-    (is (= (extra-argument "extra") (run "list" "--page" "abc" "extra"))))
-  (is (= ["One"] (map :title (rows)))))
+  (let [before (rows)]
+    (testing "an unknown option is reported before a blank title"
+      (is (= (unknown-option "bogus") (run "add" "" "--bogus" "y"))))
+    (testing "an unknown option is reported before an unreadable date"
+      (is (= (unknown-option "bogus") (run "add" "x" "--due" "fri" "--bogus" "y"))))
+    (testing "an extra word is reported before an unreadable date"
+      (is (= (extra-argument "y") (run "add" "x" "y" "--due" "fri"))))
+    (testing "an extra word is reported before a bad parent"
+      (is (= (extra-argument "y") (run "add" "x" "y" "--parent" "abc"))))
+    (testing "an unknown option is reported before an extra word"
+      (is (= (unknown-option "bogus") (run "add" "buy" "milk" "--bogus" "y"))))
+    (testing "an extra word is reported before a bad id"
+      (is (= (extra-argument "4") (run "done" "abc" "4"))))
+    (testing "an unknown option is reported before a bad id"
+      (is (= (unknown-option "bogus") (run "done" "--bogus" "abc"))))
+    (testing "an extra word is reported before a bad page"
+      (is (= (extra-argument "extra") (run "list" "--page" "abc" "extra"))))
+    (is (= before (rows)))))
 
 (deftest help-prints-the-usage-with-descriptions-in-one-column
   (is (= {:exit 0

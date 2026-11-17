@@ -29,7 +29,7 @@ Commands:
                                    "'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.")
     :validation/bad-page      "--page needs a number."
     :validation/missing-value (str "--" (:option details) " needs a value.")
-    :validation/unknown-option (str "Unknown option '--" (:option details) "'.")
+    :validation/unknown-option (str "Unknown option '" (:option details) "'.")
     :validation/extra-argument (str "Unexpected argument '" (:input details)
                                     "'. Put text with spaces in quotes.")))
 
@@ -88,9 +88,12 @@ Commands:
             {:exit 0 :out (str "Task " (:id task) " " (get-in transition-messages [command outcome]) ".\n") :err ""}))))
     (fallback parsed)))
 
-(defn- option-name [word]
-  (when (str/starts-with? word "--")
-    (first (str/split (subs word 2) #"=" 2))))
+(defn- option-word
+  "The option as typed, dashes kept and any `=value` dropped, or nil when the
+  word is not an option. A dash before a digit, as in `-1d`, starts a value."
+  [word]
+  (when (re-find #"^--?[A-Za-z]" word)
+    (first (str/split word #"=" 2))))
 
 (defn- shape-checked
   "Refuse an option the entry does not define, then a word beyond its
@@ -101,10 +104,10 @@ Commands:
   (let [allowed (apply disj (set (keys coerce)) args->opts)]
     (assoc entry :fn
            (fn [{:keys [opts args] :as parsed}]
-             (if-let [option (or (some #(when-let [n (option-name %)]
-                                          (when-not (allowed (keyword n)) n))
+             (if-let [option (or (some #(when-let [w (option-word %)]
+                                          (when-not (allowed (keyword (str/replace w #"^--?" ""))) w))
                                        (drop (count cmds) argv))
-                                 (some #(when-not (contains? coerce %) (name %)) (keys opts)))]
+                                 (some #(when-not (contains? coerce %) (str "--" (name %))) (keys opts)))]
                (error-result {:error/code    :validation/unknown-option
                               :error/details {:option option}})
                (if (seq args)
