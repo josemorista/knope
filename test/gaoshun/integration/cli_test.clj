@@ -637,31 +637,21 @@
     (is (= before (rows)))))
 
 (deftest help-prints-the-usage-with-descriptions-in-one-column
-  (let [{:keys [exit out err]} (run "--help")
-        [header blank commands & lines] (str/split-lines out)
-        entries (for [line lines
-                      :let [[_ synopsis gap description] (re-find #"^  (\S.*?)( {2,})(\S.*)$" line)]]
-                  {:synopsis synopsis :description description :column (+ 2 (count synopsis) (count gap))})
-        column (+ 2 (apply max (map (comp count :synopsis) entries)) 2)]
-    (is (= 0 exit))
-    (is (= "" err))
-    (is (= ["Usage: gaoshun <command> [options]" "" "Commands:"] [header blank commands]))
-    (is (= (count lines) (count entries)) "every command line has a synopsis and a description")
-    (is (every? #(= column (:column %)) entries) "descriptions start at one column, two spaces past the longest synopsis")
-    (is (= {"add <title> [--due DATE] [--note TEXT] [--parent ID]" "Add a task, or a subtask of ID."
-            "list [--all] [--page N]"                              "Show pending tasks, 50 per page; --all includes closed ones."
-            "start ID"                                             "Mark a task as in progress."
-            "done ID"                                              "Mark a task as done."
-            "drop ID"                                              "Mark a task as dropped."
-            "reopen ID"                                            "Move a done or dropped task back to todo."}
-           (into {} (map (juxt :synopsis :description))
-                 (remove #(re-find #"^(edit|rm)\b" (:synopsis %)) entries))))
-    (is (= ["edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]"]
-           (map :synopsis (filter #(str/starts-with? (:synopsis %) "edit") entries))))
-    (is (= ["rm ID [--force]"]
-           (map :synopsis (filter #(str/starts-with? (:synopsis %) "rm") entries))))
-    (is (every? (complement str/blank?)
-                (map :description (filter #(str/starts-with? (:synopsis %) "rm") entries))))))
+  (is (= {:exit 0
+          :out  "Usage: gaoshun <command> [options]
+
+Commands:
+  add <title> [--due DATE] [--note TEXT] [--parent ID]          Add a task, or a subtask of ID.
+  list [--all] [--page N]                                       Show pending tasks, 50 per page; --all includes closed ones.
+  start ID                                                      Mark a task as in progress.
+  done ID                                                       Mark a task as done.
+  drop ID                                                       Mark a task as dropped.
+  reopen ID                                                     Move a done or dropped task back to todo.
+  edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]  Change a task's title, due date or note.
+  rm ID [--force]                                               Delete a task; --force also deletes its subtasks.
+"
+          :err  ""}
+         (run "--help"))))
 
 (deftest list-renders-a-dimmed-context-row-dim-as-a-whole-with-no-urgency-color
   (insert! {:title "Closed parent" :status :done :due-date (LocalDate/of 2026 9 26)})
@@ -907,16 +897,19 @@
     (is (= (without-family before) (rows)))
     (is (= [1 2 6] (mapv :id (rows))))))
 
-(deftest forced-rm-of-a-parent-with-one-subtask-reads-in-the-singular
-  (doseq [argv [["rm" "3" "--force"] ["rm" "--force" "3"]]]
-    (testing (pr-str argv)
-      (sqlite/execute! helpers/*db-path* ["DELETE FROM tasks"])
-      (sqlite/execute! helpers/*db-path* ["DELETE FROM sqlite_sequence WHERE name = 'tasks'"])
-      (let [before (seed-family! 1)]
-        (is (= 5 (count before)))
-        (is (= {:exit 0 :out "Deleted task 3 and 1 subtask.\n" :err ""} (apply run argv)))
-        (is (= (without-family before) (rows)))
-        (is (= [1 2 5] (mapv :id (rows))))))))
+(deftest forced-rm-of-a-parent-with-one-subtask-reads-in-the-singular-with-force-after-the-id
+  (let [before (seed-family! 1)]
+    (is (= 5 (count before)))
+    (is (= {:exit 0 :out "Deleted task 3 and 1 subtask.\n" :err ""} (run "rm" "3" "--force")))
+    (is (= (without-family before) (rows)))
+    (is (= [1 2 5] (mapv :id (rows))))))
+
+(deftest forced-rm-of-a-parent-with-one-subtask-reads-in-the-singular-with-force-before-the-id
+  (let [before (seed-family! 1)]
+    (is (= 5 (count before)))
+    (is (= {:exit 0 :out "Deleted task 3 and 1 subtask.\n" :err ""} (run "rm" "--force" "3")))
+    (is (= (without-family before) (rows)))
+    (is (= [1 2 5] (mapv :id (rows))))))
 
 (deftest forced-rm-of-a-task-without-subtasks-deletes-just-that-task
   (let [before (seed-family! 0)]
