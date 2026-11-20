@@ -18,6 +18,8 @@ Commands:
   reopen ID                                                     Move a done or dropped task back to todo.
   edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]  Change a task's title, due date or note.
   rm ID [--force]                                               Delete a task; --force also deletes its subtasks.
+  day [DATE]                                                    Show what was done, dropped and open on a day; today by default.
+  search TEXT                                                   Find tasks whose title or note has every word as a prefix.
 ")
 
 (defn- error-message [{:error/keys [code details]}]
@@ -34,6 +36,7 @@ Commands:
     :validation/conflicting-flags "--due and --clear-due can't be used together."
     :validation/bad-date      (str "Can't read date '" (:input details)
                                    "'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.")
+    :validation/empty-search  "Search needs at least one word."
     :validation/bad-page      "--page needs a number."
     :validation/missing-value (str "--" (:option details) " needs a value.")
     :validation/unknown-option (str "Unknown option '" (:option details) "'.")
@@ -72,6 +75,34 @@ Commands:
             lines                (cond-> (render/tree-lines entries opts)
                                    more? (conj (more-line all? page)))]
         {:exit 0 :out (str (str/join "\n" lines) "\n") :err ""}))))
+
+(defn- day [components opts {cli-opts :opts}]
+  (let [today (.toLocalDate ((:clock components)))
+        date  (adapters.task/args->day cli-opts today)]
+    (if (:error/code date)
+      (error-result date)
+      (let [sections (controllers.task/day date components)
+            row      (fn [task]
+                       (-> (adapters.task/task->display-row task today {:parent-ref (:parent-id task)})
+                           (dissoc :due-label :urgency)))
+            ;; A task finished after the day was still open on it.
+            as-open  (fn [task]
+                       (cond-> task (#{:done :dropped} (:status task)) (assoc :status :todo)))
+            lines    (render/section-lines date
+                                           (-> sections
+                                               (update-vals #(mapv row %))
+                                               (assoc :open (mapv (comp row as-open) (:open sections))))
+                                           opts)]
+        {:exit 0 :out (str (str/join "\n" lines) "\n") :err ""}))))
+
+(defn- search [components opts {cli-opts :opts}]
+  (let [match (adapters.task/search-match (:text cli-opts))]
+    (if (:error/code match)
+      (error-result match)
+      (let [today (.toLocalDate ((:clock components)))
+            tasks (controllers.task/search match components)
+            rows  (mapv #(adapters.task/task->display-row % today {:parent-ref (:parent-id %)}) tasks)]
+        {:exit 0 :out (str (str/join "\n" (render/flat-lines rows opts)) "\n") :err ""}))))
 
 (defn- fallback [{:keys [opts]}]
   (if (:help opts)
@@ -153,8 +184,22 @@ Commands:
                                 :error/details {:input (first args)}})
                  (handler parsed)))))))
 
+(defn- empty-search-first
+  "babashka.cli reads a punctuation-only word such as `-.` as an option, so no
+  text arrives. Answer that as an empty search before the shape check calls
+  the option unknown."
+  [{handler :fn :as entry}]
+  (assoc entry :fn
+         (fn [{:keys [opts args] :as parsed}]
+           (let [match (adapters.task/search-match (:text opts))]
+             (if (and (empty? args)
+                      (:error/code match)
+                      (not-any? #(re-find #"[A-Za-z]" (name %)) (keys (dissoc opts :text))))
+               (error-result match)
+               (handler parsed))))))
+
 (defn- dispatch [components opts argv]
-  (cli/dispatch (conj (mapv (partial shape-checked argv)
+  (cli/dispatch (conj (into (mapv (partial shape-checked argv)
                             [{:cmds       ["add"]
                               :fn         (partial add components)
                               :args->opts [:title]
@@ -185,7 +230,16 @@ Commands:
                              {:cmds       ["rm"]
                               :fn         (partial rm components)
                               :args->opts [:id]
-                              :coerce     {:id :string :force :boolean}}])
+                              :coerce     {:id :string :force :boolean}}
+                             {:cmds       ["day"]
+                              :fn         (partial day components opts)
+                              :args->opts [:date]
+                              :coerce     {:date :string}}])
+                          [(empty-search-first
+                            (shape-checked argv {:cmds       ["search"]
+                                                 :fn         (partial search components opts)
+                                                 :args->opts [:text]
+                                                 :coerce     {:text :string}}))])
                       {:cmds [] :fn fallback})
                 argv))
 

@@ -1,5 +1,7 @@
 (ns gaoshun.diplomat.sqlite.task-test
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing use-fixtures]]
+            [gaoshun.adapters.task :as adapters.task]
             [gaoshun.diplomat.sqlite.task :as sqlite.task]
             [gaoshun.gen.task :as gen.task]
             [gaoshun.helpers :as helpers]
@@ -227,3 +229,175 @@
     (is (nil? (sqlite.task/find-by-id 2 (db))))
     (is (= parent (sqlite.task/find-by-id 1 (db))))
     (is (= sibling (sqlite.task/find-by-id 3 (db))))))
+
+(def ^:private day (LocalDate/of 2026 9 20))
+
+(defn- day-ids
+  "Ids of the rows the day query returns for day, in id order."
+  []
+  (->> (sqlite.task/day-rows day (.plusDays day 1) (db))
+       (map :id)
+       sort
+       vec))
+
+(deftest day-rows-returns-a-task-created-in-the-last-second-of-the-day
+  (insert-all! [(gen.task/task {:id nil :title "last second"
+                                :created-at (LocalDateTime/of 2026 9 20 23 59 59)})])
+  (is (= [1] (day-ids))))
+
+(deftest day-rows-leaves-out-a-task-created-at-midnight-of-the-next-day
+  (insert-all! [(gen.task/task {:id nil :title "last second"
+                                :created-at (LocalDateTime/of 2026 9 20 23 59 59)})
+                (gen.task/task {:id nil :title "first second of the next day"
+                                :created-at (LocalDateTime/of 2026 9 21 0 0 0)})])
+  (is (= [1] (day-ids))))
+
+(deftest day-rows-returns-an-open-task-created-on-any-earlier-day
+  (insert-all! [(gen.task/task {:id nil :created-at (LocalDateTime/of 2026 9 20 0 0 0)})
+                (gen.task/task {:id nil :status :doing :created-at (LocalDateTime/of 2026 1 5 8 30 0)})])
+  (is (= [1 2] (day-ids))))
+
+(deftest day-rows-returns-a-task-finished-on-the-day-whenever-it-was-created
+  (insert-all! [(gen.task/task {:id nil :status :done :finish-date day
+                                :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+                (gen.task/task {:id nil :status :dropped :finish-date day
+                                :created-at (LocalDateTime/of 2026 9 20 23 59 59)})
+                (gen.task/task {:id nil :status :done :finish-date day
+                                :created-at (LocalDateTime/of 2026 9 21 0 0 0)})])
+  (is (= [1 2 3] (day-ids))))
+
+(deftest day-rows-leaves-out-a-task-finished-before-the-day
+  (insert-all! [(gen.task/task {:id nil :title "still open"
+                                :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+                (gen.task/task {:id nil :status :done :finish-date (LocalDate/of 2026 9 19)
+                                :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+                (gen.task/task {:id nil :status :dropped :finish-date (LocalDate/of 2026 9 1)
+                                :created-at (LocalDateTime/of 2026 8 30 9 0 0)})])
+  (is (= [1] (day-ids))))
+
+(deftest day-rows-returns-a-task-created-before-the-day-and-finished-after-it
+  (insert-all! [(gen.task/task {:id nil :status :done :finish-date (LocalDate/of 2026 9 21)
+                                :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+                (gen.task/task {:id nil :status :done :finish-date (LocalDate/of 2026 9 21)
+                                :created-at (LocalDateTime/of 2026 9 21 8 0 0)})])
+  (is (= [1] (day-ids))))
+
+(deftest day-rows-returns-whole-tasks-and-subtasks
+  (let [[parent child] (insert-all! [(gen.task/task {:id nil :title "Parent" :note "context"
+                                                     :due-date (LocalDate/of 2026 10 1)
+                                                     :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+                                     (gen.task/task {:id nil :title "Child" :parent-id 1
+                                                     :status :done :finish-date day
+                                                     :created-at (LocalDateTime/of 2026 9 11 9 0 0)})])]
+    (is (= [parent child]
+           (sort-by :id (sqlite.task/day-rows day (.plusDays day 1) (db)))))))
+
+;; The plan is read for the statement day-rows runs, taken from its var.
+(deftest day-query-plan-uses-the-finish-date-and-creation-time-indexes
+  (insert-all! (for [n (range 40)]
+                 (gen.task/task {:id nil :title (str "task " n)
+                                 :created-at (LocalDateTime/of 2026 9 (inc (mod n 28)) 10 0 0)})))
+  (is (seq (sqlite.task/day-rows day (.plusDays day 1) (db))))
+  (let [plan (->> (sqlite/query (db) [(str "EXPLAIN QUERY PLAN " @#'sqlite.task/day-sql)
+                                      "2026-09-20" "2026-09-21" "2026-09-20"])
+                  (map :detail)
+                  (str/join "\n"))]
+    (is (str/includes? plan "tasks_finish_date_idx") plan)
+    (is (str/includes? plan "tasks_created_at_idx") plan)))
+
+(defn- search-ids
+  "Ids of the tasks search returns for the typed text, in result order."
+  [text]
+  (mapv :id (sqlite.task/search (adapters.task/search-match text) (db))))
+
+(deftest search-finds-a-task-by-the-prefix-of-every-word
+  (insert-all! [(gen.task/task {:id nil :title "Authentication service"})
+                (gen.task/task {:id nil :title "Authentication only"})
+                (gen.task/task {:id nil :title "Billing service"})])
+  (is (= [1] (search-ids "auth serv")))
+  (is (= [1 2] (sort (search-ids "authen"))))
+  (is (= [] (search-ids "uthentication"))))
+
+(deftest search-returns-whole-tasks
+  (let [[task] (insert-all! [(gen.task/task {:id nil :title "Authentication service" :note "for Q3"
+                                             :due-date (LocalDate/of 2026 10 1)})
+                             (gen.task/task {:id nil :title "Billing"})])]
+    (is (= [task] (sqlite.task/search (adapters.task/search-match "auth") (db))))))
+
+(deftest search-matches-the-note-as-well-as-the-title
+  (insert-all! [(gen.task/task {:id nil :title "Login flow" :note "Autenticação do serviço"})
+                (gen.task/task {:id nil :title "Billing"})])
+  (is (= [1] (search-ids "serviço"))))
+
+(deftest search-ignores-case
+  (insert-all! [(gen.task/task {:id nil :title "Authentication service"})])
+  (is (= [1] (search-ids "AUTH")))
+  (is (= [1] (search-ids "Serv"))))
+
+(deftest search-ignores-accents-in-the-text-and-in-the-query
+  (insert-all! [(gen.task/task {:id nil :title "Việt Nam trip"})
+                (gen.task/task {:id nil :title "Login flow" :note "Autenticação do serviço"})])
+  (is (= [1] (search-ids "viet")))
+  (is (= [1] (search-ids "Việt")))
+  (is (= [2] (search-ids "autenticacao")))
+  (is (= [2] (search-ids "servico"))))
+
+(deftest search-covers-every-status-and-subtasks
+  (insert-all! [(gen.task/task {:id nil :title "Auth todo"})
+                (gen.task/task {:id nil :title "Auth doing" :status :doing})
+                (gen.task/task {:id nil :title "Auth done" :status :done})
+                (gen.task/task {:id nil :title "Auth dropped" :status :dropped})
+                (gen.task/task {:id nil :title "Auth step" :parent-id 1})])
+  (is (= [1 2 3 4 5] (sort (search-ids "auth")))))
+
+(deftest search-ranks-the-more-relevant-task-first
+  (insert-all! [(gen.task/task {:id nil :title "Quarterly planning meeting notes and agenda for everyone"})
+                (gen.task/task {:id nil :title "Quarterly"})])
+  (is (= [2 1] (search-ids "quarterly"))))
+
+(deftest search-with-no-match-returns-nothing
+  (insert-all! [(gen.task/task {:id nil :title "Authentication service"})])
+  (is (= [1] (search-ids "auth")))
+  (is (= [] (search-ids "billing")))
+  (is (= [] (search-ids "auth billing"))))
+
+(deftest search-returns-nothing-until-a-matching-task-exists
+  (is (= [] (search-ids "auth")))
+  (insert-all! [(gen.task/task {:id nil :title "Authentication service"})])
+  (is (= [1] (search-ids "auth"))))
+
+(deftest search-runs-an-expression-built-from-a-word-with-a-dot-without-an-fts-error
+  (insert-all! [(gen.task/task {:id nil :title "auth.svc rollout"})
+                (gen.task/task {:id nil :title "Billing"})])
+  (is (= [1] (search-ids "auth.svc"))))
+
+(deftest search-runs-an-expression-built-from-a-word-with-a-double-quote-without-an-fts-error
+  (insert-all! [(gen.task/task {:id nil :title "Say \"hi\" to the team"})
+                (gen.task/task {:id nil :title "Billing"})])
+  (is (= [1] (search-ids "\"hi\"")))
+  (is (= [1] (search-ids "say\"hi"))))
+
+(deftest search-ignores-punctuation-only-words-beside-real-ones
+  (insert-all! [(gen.task/task {:id nil :title "Authentication service"})])
+  (is (= [1] (search-ids "- auth . \" serv"))))
+
+(deftest search-finds-the-new-title-after-an-update-and-not-the-old-one
+  (let [[task] (insert-all! [(gen.task/task {:id nil :title "Authentication service" :note "legacy"})])]
+    (sqlite.task/update! (assoc task :title "Billing report" :note "invoices") (db))
+    (is (= [] (search-ids "authentication")))
+    (is (= [] (search-ids "legacy")))
+    (is (= [1] (search-ids "billing")))
+    (is (= [1] (search-ids "invoices")))))
+
+(deftest search-finds-nothing-after-the-task-is-deleted
+  (insert-all! [(gen.task/task {:id nil :title "Authentication service"})
+                (gen.task/task {:id nil :title "Authentication step" :parent-id 1})
+                (gen.task/task {:id nil :title "Authentication docs"})])
+  (sqlite.task/delete! 1 (db))
+  (is (= [3] (search-ids "auth"))))
+
+(deftest search-still-finds-a-task-after-a-status-update
+  (let [[task] (insert-all! [(gen.task/task {:id nil :title "Authentication service"})])
+        done   (assoc task :status :done :finish-date (LocalDate/of 2026 9 28))]
+    (sqlite.task/update! done (db))
+    (is (= [done] (sqlite.task/search (adapters.task/search-match "auth serv") (db))))))

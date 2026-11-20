@@ -649,6 +649,8 @@ Commands:
   reopen ID                                                     Move a done or dropped task back to todo.
   edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]  Change a task's title, due date or note.
   rm ID [--force]                                               Delete a task; --force also deletes its subtasks.
+  day [DATE]                                                    Show what was done, dropped and open on a day; today by default.
+  search TEXT                                                   Find tasks whose title or note has every word as a prefix.
 "
           :err  ""}
          (run "--help"))))
@@ -932,3 +934,261 @@ Commands:
       (testing (pr-str argv)
         (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (apply run argv)))))
     (is (= before (rows)))))
+
+(defn- seed-day!
+  "Tasks around 2026-09-20: done on it (1), dropped on it (2), open across it
+  (3), created after it (4), finished before it (5), a subtask of 1 done on it
+  (6) and a subtask of 3 still open (7). No task has a due date."
+  []
+  (let [d #(LocalDate/of 2026 9 %)
+        t #(LocalDateTime/of 2026 9 %1 %2 0 0)]
+    (insert! {:title "Ship release notes" :status :done :finish-date (d 20) :created-at (t 15 9)})
+    (insert! {:title "Old spike" :status :dropped :finish-date (d 20) :created-at (t 10 9)})
+    (insert! {:title "Write design" :status :doing :created-at (t 12 9)})
+    (insert! {:title "Created later" :created-at (t 22 9)})
+    (insert! {:title "Finished earlier" :status :done :finish-date (d 18) :created-at (t 10 9)})
+    (insert! {:title "Fix login" :parent-id 1 :status :done :finish-date (d 20) :created-at (t 16 9)})
+    (insert! {:title "Outline" :parent-id 3 :created-at (t 13 9)})))
+
+(deftest day-prints-the-date-then-the-done-dropped-and-open-sections
+  (seed-day!)
+  (is (= {:exit 0
+          :out  (str "2026-09-20\n"
+                     "Done\n"
+                     "  [x] 1 Ship release notes\n"
+                     "  [x] 6 Fix login ↳ #1\n"
+                     "Dropped\n"
+                     "  [-] 2 Old spike\n"
+                     "Open\n"
+                     "  [~] 3 Write design\n"
+                     "  [ ] 7 Outline ↳ #3\n")
+          :err  ""}
+         (run "day" "2026-09-20"))))
+
+(deftest day-omits-the-sections-that-are-empty
+  (insert! {:title "Old spike" :status :dropped :finish-date (LocalDate/of 2026 9 20)
+            :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+  (is (= {:exit 0 :out "2026-09-20\nDropped\n  [-] 1 Old spike\n" :err ""}
+         (run "day" "2026-09-20"))))
+
+(deftest day-never-lists-a-task-finished-on-the-day-under-open
+  (insert! {:title "Ship release notes" :status :done :finish-date (LocalDate/of 2026 9 20)
+            :created-at (LocalDateTime/of 2026 9 15 9 0 0)})
+  (let [{:keys [out]} (run "day" "2026-09-20")]
+    (is (= "2026-09-20\nDone\n  [x] 1 Ship release notes\n" out))
+    (is (not (str/includes? out "Open")))))
+
+(deftest day-lists-a-task-created-in-the-last-second-of-the-day-as-open
+  (insert! {:title "Late task" :created-at (LocalDateTime/of 2026 9 20 23 59 59)})
+  (insert! {:title "Next day task" :created-at (LocalDateTime/of 2026 9 21 0 0 0)})
+  (is (= {:exit 0 :out "2026-09-20\nOpen\n  [ ] 1 Late task\n" :err ""}
+         (run "day" "2026-09-20")))
+  (testing "the next day has both, since neither is finished"
+    (is (= {:exit 0 :out "2026-09-21\nOpen\n  [ ] 1 Late task\n  [ ] 2 Next day task\n" :err ""}
+           (run "day" "2026-09-21")))))
+
+(deftest day-with-nothing-recorded-says-so-and-exits-zero
+  (is (= {:exit 0 :out "Nothing recorded for 2026-09-20.\n" :err ""}
+         (run "day" "2026-09-20"))))
+
+(deftest day-says-nothing-was-recorded-when-every-task-falls-outside-the-day
+  (insert! {:title "Created later" :created-at (LocalDateTime/of 2026 9 22 9 0 0)})
+  (insert! {:title "Finished earlier" :status :done :finish-date (LocalDate/of 2026 9 18)
+            :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+  (is (= {:exit 0 :out "Nothing recorded for 2026-09-20.\n" :err ""}
+         (run "day" "2026-09-20"))))
+
+(deftest day-reads-a-task-reopened-after-its-finish-day-as-open-on-that-day
+  (insert! {:title "Ship release notes" :created-at (LocalDateTime/of 2026 9 15 9 0 0)})
+  (is (= {:exit 0 :out "Task 1 marked done.\n" :err ""}
+         (run-on (LocalDateTime/of 2026 9 20 9 0 0) "done" "1")))
+  (is (= {:exit 0 :out "2026-09-20\nDone\n  [x] 1 Ship release notes\n" :err ""}
+         (run "day" "2026-09-20")))
+  (is (= {:exit 0 :out "Task 1 reopened.\n" :err ""}
+         (run-on (LocalDateTime/of 2026 9 22 9 0 0) "reopen" "1")))
+  (is (= {:exit 0 :out "2026-09-20\nOpen\n  [ ] 1 Ship release notes\n" :err ""}
+         (run "day" "2026-09-20"))))
+
+(deftest day-lists-a-task-finished-after-the-day-as-open-with-the-open-glyph
+  (insert! {:title "Ship release notes" :status :done :finish-date (LocalDate/of 2026 9 22)
+            :due-date (LocalDate/of 2026 9 19) :created-at (LocalDateTime/of 2026 9 15 9 0 0)})
+  (insert! {:title "Old spike" :status :dropped :finish-date (LocalDate/of 2026 9 23)
+            :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+  (is (= {:exit 0 :out "2026-09-20\nOpen\n  [ ] 1 Ship release notes\n  [ ] 2 Old spike\n" :err ""}
+         (run "day" "2026-09-20"))))
+
+(deftest day-prints-no-due-label-for-a-task-with-a-due-date
+  (insert! {:title "Write design" :status :doing :due-date (LocalDate/of 2026 9 19)
+            :created-at (LocalDateTime/of 2026 9 12 9 0 0)})
+  (is (= {:exit 0 :out "2026-09-20\nOpen\n  [~] 1 Write design\n" :err ""}
+         (run "day" "2026-09-20"))))
+
+(deftest day-without-a-date-shows-today
+  (insert! {:title "Done today" :status :done :finish-date (LocalDate/of 2026 9 28)
+            :created-at (LocalDateTime/of 2026 9 28 8 0 0)})
+  (insert! {:title "Done yesterday" :status :done :finish-date (LocalDate/of 2026 9 27)
+            :created-at (LocalDateTime/of 2026 9 27 8 0 0)})
+  (is (= {:exit 0 :out "2026-09-28\nDone\n  [x] 1 Done today\n" :err ""}
+         (run "day"))))
+
+(deftest day-reads-a-negative-offset-as-a-date
+  (insert! {:title "Done today" :status :done :finish-date (LocalDate/of 2026 9 28)
+            :created-at (LocalDateTime/of 2026 9 28 8 0 0)})
+  (insert! {:title "Done yesterday" :status :done :finish-date (LocalDate/of 2026 9 27)
+            :created-at (LocalDateTime/of 2026 9 27 8 0 0)})
+  (is (= {:exit 0 :out "2026-09-27\nDone\n  [x] 2 Done yesterday\n" :err ""}
+         (run "day" "-1d"))))
+
+(deftest day-with-an-unreadable-date-fails
+  (is (= {:exit 1
+          :out  ""
+          :err  "Can't read date 'fri'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.\n"}
+         (run "day" "fri"))))
+
+(def ^:private empty-search
+  {:exit 1 :out "" :err "Search needs at least one word.\n"})
+
+(deftest search-finds-a-task-by-the-prefix-of-every-quoted-word
+  (insert! {:title "Authentication service"})
+  (insert! {:title "Authentication only"})
+  (insert! {:title "Billing service"})
+  (is (= {:exit 0 :out "[ ] 1 Authentication service\n" :err ""}
+         (run "search" "auth serv"))))
+
+(deftest search-finds-a-task-by-a-single-word-prefix
+  (insert! {:title "Authentication service"})
+  (insert! {:title "Billing service"})
+  (is (= {:exit 0 :out "[ ] 1 Authentication service\n" :err ""}
+         (run "search" "auth"))))
+
+(deftest search-does-not-match-inside-a-word
+  (insert! {:title "Authentication service"})
+  (is (= {:exit 0 :out "No matches.\n" :err ""}
+         (run "search" "thentication"))))
+
+(deftest search-finds-a-note-written-with-accents-from-the-unaccented-word
+  (insert! {:title "Login flow" :note "Autentica\u00e7\u00e3o do servi\u00e7o"})
+  (insert! {:title "Billing"})
+  (is (= {:exit 0 :out "[ ] 1 Login flow\n" :err ""}
+         (run "search" "autenticacao"))))
+
+(deftest search-finds-an-accented-title-from-the-unaccented-word
+  (insert! {:title "Vi\u1ec7t Nam trip"})
+  (insert! {:title "Billing"})
+  (is (= {:exit 0 :out "[ ] 1 Vi\u1ec7t Nam trip\n" :err ""}
+         (run "search" "viet"))))
+
+(deftest search-ignores-case
+  (insert! {:title "Authentication service"})
+  (is (= {:exit 0 :out "[ ] 1 Authentication service\n" :err ""}
+         (run "search" "AUTH SERV"))))
+
+(deftest search-prints-one-line-per-match-most-relevant-first
+  (insert! {:title "Quarterly planning meeting notes and agenda for everyone"})
+  (insert! {:title "Quarterly"})
+  (insert! {:title "Billing"})
+  (is (= {:exit 0
+          :out  (str "[ ] 2 Quarterly\n"
+                     "[ ] 1 Quarterly planning meeting notes and agenda for everyone\n")
+          :err  ""}
+         (run "search" "quarterly"))))
+
+(deftest search-covers-every-status
+  (insert! {:title "Auth todo"})
+  (insert! {:title "Auth doing" :status :doing})
+  (insert! {:title "Auth done" :status :done})
+  (insert! {:title "Auth dropped" :status :dropped})
+  (let [{:keys [exit out err]} (run "search" "auth")]
+    (is (= 0 exit))
+    (is (= "" err))
+    (is (= #{"[ ] 1 Auth todo" "[~] 2 Auth doing" "[x] 3 Auth done" "[-] 4 Auth dropped"}
+           (set (str/split-lines out))))
+    (is (= 4 (count (str/split-lines out))))))
+
+(deftest search-marks-a-subtask-with-its-parent
+  (insert! {:title "Release plan"})
+  (insert! {:title "Authentication fix" :parent-id 1})
+  (is (= {:exit 0 :out "[ ] 2 Authentication fix \u21b3 #1\n" :err ""}
+         (run "search" "auth"))))
+
+(deftest search-finds-a-subtask-whose-parent-does-not-match
+  (insert! {:title "Release plan"})
+  (insert! {:title "Authentication fix" :parent-id 1})
+  (insert! {:title "Authentication docs"})
+  (let [lines (str/split-lines (:out (run "search" "auth")))]
+    (is (= #{"[ ] 2 Authentication fix \u21b3 #1" "[ ] 3 Authentication docs"} (set lines)))
+    (is (= 2 (count lines)))))
+
+(deftest search-with-no-match-says-so-and-exits-zero
+  (insert! {:title "Authentication service"})
+  (is (= "[ ] 1 Authentication service\n" (:out (run "search" "auth"))))
+  (is (= {:exit 0 :out "No matches.\n" :err ""} (run "search" "billing")))
+  (is (= {:exit 0 :out "No matches.\n" :err ""} (run "search" "auth billing"))))
+
+(deftest search-on-an-empty-database-says-no-matches
+  (is (= {:exit 0 :out "No matches.\n" :err ""} (run "search" "auth"))))
+
+(deftest search-runs-a-word-that-mixes-punctuation-and-letters
+  (insert! {:title "auth.svc rollout"})
+  (insert! {:title "Billing"})
+  (is (= {:exit 0 :out "[ ] 1 auth.svc rollout\n" :err ""} (run "search" "auth.svc")))
+  (is (= {:exit 0 :out "[ ] 1 auth.svc rollout\n" :err ""} (run "search" "auth.svc rollout"))))
+
+(deftest search-runs-a-word-with-a-double-quote
+  (insert! {:title "Say \"hi\" to the team"})
+  (is (= {:exit 0 :out "[ ] 1 Say \"hi\" to the team\n" :err ""} (run "search" "\"hi\""))))
+
+(deftest search-ignores-punctuation-only-words-beside-real-ones
+  (insert! {:title "Authentication service"})
+  (is (= {:exit 0 :out "[ ] 1 Authentication service\n" :err ""}
+         (run "search" "auth . serv"))))
+
+(deftest search-with-no-letter-or-digit-is-refused-as-an-empty-search
+  (insert! {:title "Authentication service"})
+  (doseq [argv [["search" "-."] ["search" "-"] ["search" "."] ["search" "..."] ["search" "!!! ???"]
+                ["search" "- ."] ["search" "\"\""] ["search" ""] ["search" "   "] ["search"]]]
+    (testing (pr-str argv)
+      (is (= empty-search (apply run argv))))))
+
+(deftest search-with-unquoted-multi-word-text-is-refused
+  (insert! {:title "Authentication service"})
+  (is (= (extra-argument "serv") (run "search" "auth" "serv")))
+  (is (= (extra-argument "b") (run "search" "a" "b" "c"))))
+
+(deftest search-with-an-unknown-option-is-refused
+  (insert! {:title "Authentication service"})
+  (is (= (unknown-option "bogus") (run "search" "auth" "--bogus" "x"))))
+
+(deftest search-follows-an-edit-of-the-title-and-the-note
+  (is (= {:exit 0 :out "Added task 1.\n" :err ""} (run "add" "Authentication service" "--note" "legacy")))
+  (is (= "[ ] 1 Authentication service\n" (:out (run "search" "auth"))))
+  (is (= "[ ] 1 Authentication service\n" (:out (run "search" "legacy"))))
+  (is (= {:exit 0 :out "Updated task 1.\n" :err ""}
+         (run "edit" "1" "--title" "Billing report" "--note" "invoices")))
+  (testing "the old words stop matching"
+    (is (= {:exit 0 :out "No matches.\n" :err ""} (run "search" "auth")))
+    (is (= {:exit 0 :out "No matches.\n" :err ""} (run "search" "legacy"))))
+  (testing "the new words match"
+    (is (= {:exit 0 :out "[ ] 1 Billing report\n" :err ""} (run "search" "billing")))
+    (is (= {:exit 0 :out "[ ] 1 Billing report\n" :err ""} (run "search" "invoices")))))
+
+(deftest search-finds-nothing-after-the-task-is-removed
+  (run "add" "Authentication service")
+  (run "add" "Authentication docs")
+  (is (= "[ ] 1 Authentication service\n[ ] 2 Authentication docs\n"
+         (:out (run "search" "auth"))))
+  (is (= {:exit 0 :out "Deleted task 1.\n" :err ""} (run "rm" "1")))
+  (is (= {:exit 0 :out "[ ] 2 Authentication docs\n" :err ""} (run "search" "auth")))
+  (is (= {:exit 0 :out "Deleted task 2.\n" :err ""} (run "rm" "2")))
+  (is (= {:exit 0 :out "No matches.\n" :err ""} (run "search" "auth"))))
+
+(deftest search-finds-nothing-after-a-forced-remove-of-a-parent-and-its-subtasks
+  (run "add" "Authentication service")
+  (run "add" "Authentication step" "--parent" "1")
+  (is (= {:exit 0 :out "Deleted task 1 and 1 subtask.\n" :err ""} (run "rm" "1" "--force")))
+  (is (= {:exit 0 :out "No matches.\n" :err ""} (run "search" "auth"))))
+
+(deftest search-still-finds-a-task-after-it-is-marked-done
+  (run "add" "Authentication service")
+  (is (= {:exit 0 :out "Task 1 marked done.\n" :err ""} (run "done" "1")))
+  (is (= {:exit 0 :out "[x] 1 Authentication service\n" :err ""} (run "search" "auth serv"))))

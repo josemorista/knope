@@ -65,6 +65,14 @@
         clear-due        (assoc :due-date nil)
         (some? note)     (assoc :note (when-not (= "" note) note))))))
 
+(defn args->day
+  "The date to show: today when none is given."
+  [{:keys [date]} today]
+  (if (nil? date)
+    today
+    (or (logic.date/parse-date-input date today)
+        {:error/code :validation/bad-date :error/details {:input date}})))
+
 (defn row->task
   [{:keys [id parent_id title note status created_at due_date finish_date]}]
   (logic.task/make-task {:id          id
@@ -107,3 +115,13 @@
       (nil? s)        0
       (nat-int? page) page
       :else           {:error/code :validation/bad-page :error/details {:input s}})))
+
+(defn search-match
+  "The FTS match expression for typed text: each word that has a letter or
+  digit, quoted as a prefix; or empty-search when none does."
+  [text]
+  (let [words (->> (str/split (str text) #"\s+")
+                   (filter #(re-find #"[\p{L}\p{N}]" %)))]
+    (if (empty? words)
+      {:error/code :validation/empty-search :error/details {}}
+      (str/join " " (map #(str "\"" (str/replace % "\"" "\"\"") "\"*") words)))))
