@@ -8,7 +8,7 @@
 .nrepl-port
 .bb-*
 
-# Local SQLite databases (e.g. a GAOSHUN_DB pointed inside the repo)
+# Local SQLite databases (e.g. a KNOPE_DB pointed inside the repo)
 *.db
 *.db-journal
 *.db-wal
