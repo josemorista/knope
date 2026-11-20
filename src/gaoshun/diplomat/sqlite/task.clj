@@ -56,6 +56,17 @@ VALUES (?, ?, ?, ?, ?, ?, ?)"]
   [limit offset db-path]
   (page-with-children "" limit offset db-path))
 
+(def ^:private day-sql
+  "SELECT * FROM tasks WHERE finish_date = ? OR (created_at < ? AND (finish_date IS NULL OR finish_date > ?))")
+
+(defn day-rows
+  "Every task finished on d, or created before next-day and not finished on or
+  before d. created_at is compared as a raw string so its index serves the
+  query."
+  [d next-day db-path]
+  (mapv adapters.task/row->task
+        (sqlite/query db-path [day-sql (str d) (str next-day) (str d)])))
+
 (defn update!
   [{:keys [id] :as task} db-path]
   (sqlite/execute! db-path
@@ -73,3 +84,12 @@ created_at = ?, due_date = ?, finish_date = ? WHERE id = ?"]
   [id db-path]
   (sqlite/execute! db-path ["DELETE FROM tasks WHERE id = ? OR parent_id = ?" id id])
   nil)
+
+(defn search
+  "Every task the match expression finds, most relevant first."
+  [match db-path]
+  (mapv adapters.task/row->task
+        (sqlite/query db-path
+                      ["SELECT t.* FROM tasks_fts f JOIN tasks t ON t.id = f.rowid
+WHERE tasks_fts MATCH ? ORDER BY bm25(tasks_fts)"
+                       match])))

@@ -223,3 +223,42 @@
   (is (= {:glyph "[ ]" :id 13 :title "Write report" :due-label nil :urgency nil :parent-ref "↳ #12"}
          (adapters.task/task->display-row
           (gen.task/task {:id 13 :parent-id 12}) today {:parent-ref 12}))))
+
+(deftest search-match-turns-each-word-into-a-quoted-prefix
+  (is (= "\"auth\"* \"serv\"*" (adapters.task/search-match "auth serv")))
+  (is (= "\"quarterly\"*" (adapters.task/search-match "quarterly"))))
+
+(deftest search-match-splits-on-any-run-of-whitespace
+  (is (= "\"auth\"* \"serv\"*" (adapters.task/search-match "  auth \t  serv\n"))))
+
+(deftest search-match-keeps-accented-letters-and-digits
+  (is (= "\"autenticação\"* \"2026\"*" (adapters.task/search-match "autenticação 2026"))))
+
+(deftest search-match-drops-a-lone-dash
+  (is (= "\"auth\"*" (adapters.task/search-match "- auth")))
+  (is (= "\"auth\"* \"serv\"*" (adapters.task/search-match "auth - serv"))))
+
+(deftest search-match-drops-a-lone-dot
+  (is (= "\"auth\"*" (adapters.task/search-match ". auth")))
+  (is (= "\"auth\"* \"serv\"*" (adapters.task/search-match "auth . serv"))))
+
+(deftest search-match-drops-a-lone-double-quote
+  (is (= "\"auth\"*" (adapters.task/search-match "\" auth")))
+  (is (= "\"auth\"*" (adapters.task/search-match "auth \""))))
+
+(deftest search-match-keeps-a-word-that-mixes-punctuation-and-letters
+  (is (= "\"auth.svc\"*" (adapters.task/search-match "auth.svc")))
+  (is (= "\"auth.svc\"* \"v2\"*" (adapters.task/search-match "auth.svc v2"))))
+
+(deftest search-match-keeps-a-word-that-mixes-punctuation-and-digits
+  (is (= "\"-1\"*" (adapters.task/search-match "-1"))))
+
+(deftest search-match-doubles-a-double-quote-inside-a-word
+  (is (= "\"say\"\"hi\"*" (adapters.task/search-match "say\"hi")))
+  (is (= "\"\"\"hi\"\"\"*" (adapters.task/search-match "\"hi\""))))
+
+(deftest search-match-reports-an-empty-search-when-no-word-has-a-letter-or-digit
+  (doseq [input ["" "   " "-" "." "-." "..." "- . \"" "!!! ???" "\"\""]]
+    (testing (pr-str input)
+      (is (= {:error/code :validation/empty-search :error/details {}}
+             (adapters.task/search-match input))))))

@@ -81,6 +81,20 @@
          (sort compare-tasks)
          (mapv #(tree-entry all? % (children-of (:id %)))))))
 
+(defn day-sections
+  "Splits the tasks recorded for day into {:done :dropped :open}, each sorted
+  by id. Done and dropped are the tasks finished on day; open is every task
+  created by the end of day and not finished on or before it, so a task
+  finished after day reads as open on it. Anything else is left out."
+  [tasks day]
+  (let [by-id         (fn [pred] (vec (sort-by :id (filter pred tasks))))
+        finished-on?  (fn [status] #(and (= status (:status %)) (= day (:finish-date %))))
+        day-end       (.atStartOfDay (.plusDays day 1))]
+    {:done    (by-id (finished-on? :done))
+     :dropped (by-id (finished-on? :dropped))
+     :open    (by-id #(and (.isBefore (:created-at %) day-end)
+                           (or (nil? (:finish-date %)) (.isAfter (:finish-date %) day))))}))
+
 (defn page-roots
   "Tasks fetched with one root past page-size: drops that root and its children
   and reports whether it existed."

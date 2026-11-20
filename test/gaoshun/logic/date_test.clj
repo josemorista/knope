@@ -64,3 +64,16 @@
 
 (deftest due-label-is-nil-without-a-due-date
   (is (nil? (logic.date/due-label nil today))))
+
+(deftest next-day-is-the-following-calendar-day
+  (is (= (LocalDate/of 2026 9 29) (logic.date/next-day today)))
+  (is (= (LocalDate/of 2026 10 1) (logic.date/next-day (LocalDate/of 2026 9 30)))))
+
+(deftest next-day-rolls-over-month-and-year-ends
+  (is (= (LocalDate/of 2026 2 1) (logic.date/next-day (LocalDate/of 2026 1 31))))
+  (is (= (LocalDate/of 2026 3 1) (logic.date/next-day (LocalDate/of 2026 2 28))))
+  (is (= (LocalDate/of 2027 1 1) (logic.date/next-day (LocalDate/of 2026 12 31)))))
+
+(deftest next-day-of-a-leap-day-is-the-first-of-march
+  (is (= (LocalDate/of 2028 2 29) (logic.date/next-day (LocalDate/of 2028 2 28))))
+  (is (= (LocalDate/of 2028 3 1) (logic.date/next-day (LocalDate/of 2028 2 29)))))

@@ -24,6 +24,10 @@
           (catch DateTimeException _ nil))
         (parse-iso s)))))
 
+(defn next-day
+  [^LocalDate d]
+  (.plusDays d 1))
+
 (defn due-label
   [due today]
   (when due

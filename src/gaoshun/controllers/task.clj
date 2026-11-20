@@ -1,5 +1,6 @@
 (ns gaoshun.controllers.task
   (:require [gaoshun.diplomat.sqlite.task :as sqlite.task]
+            [gaoshun.logic.date :as logic.date]
             [gaoshun.logic.task :as logic.task]))
 
 (defn add!
@@ -41,6 +42,12 @@
             {:id id :subtasks subtasks})))
     {:error/code :task/not-found :error/details {:id id}}))
 
+(defn day
+  "The tasks recorded for date, split into {:done :dropped :open}."
+  [date {:keys [sqlite]}]
+  (-> (sqlite.task/day-rows date (logic.date/next-day date) sqlite)
+      (logic.task/day-sections date)))
+
 (def ^:private page-size 50)
 
 (defn list-tasks
@@ -52,3 +59,8 @@
         {:keys [tasks more?]} (logic.task/page-roots fetched page-size)]
     {:tree  (logic.task/build-tree tasks {:all? all?})
      :more? more?}))
+
+(defn search
+  "The tasks the FTS match expression finds, most relevant first."
+  [match {:keys [sqlite]}]
+  (sqlite.task/search match sqlite))

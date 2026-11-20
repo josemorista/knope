@@ -406,3 +406,76 @@
   (let [done (gen.task/task {:id 7 :status :done :finish-date (LocalDate/of 2026 9 20)})]
     (is (= {:outcome :unchanged :task done}
            (logic.task/transition done :done transition-day)))))
+
+(def ^:private day (LocalDate/of 2026 9 20))
+
+(defn- day-task
+  "A task whose id is also its title, so a failing comparison reads clearly."
+  [id overrides]
+  (gen.task/task (merge {:id id :title (str "task " id)} overrides)))
+
+(deftest day-sections-puts-a-task-finished-on-the-day-in-done
+  (let [t (day-task 4 {:status :done :finish-date day :created-at (LocalDateTime/of 2026 9 10 9 0 0)})]
+    (is (= {:done [t] :dropped [] :open []} (logic.task/day-sections [t] day)))))
+
+(deftest day-sections-puts-a-task-dropped-on-the-day-in-dropped
+  (let [t (day-task 4 {:status :dropped :finish-date day :created-at (LocalDateTime/of 2026 9 10 9 0 0)})]
+    (is (= {:done [] :dropped [t] :open []} (logic.task/day-sections [t] day)))))
+
+(deftest day-sections-puts-a-task-open-across-the-day-in-open
+  (let [todo  (day-task 1 {:status :todo :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+        doing (day-task 2 {:status :doing :created-at (LocalDateTime/of 2026 9 20 23 59 59)})]
+    (is (= {:done [] :dropped [] :open [todo doing]} (logic.task/day-sections [todo doing] day)))))
+
+(deftest day-sections-leaves-out-a-task-created-after-the-day
+  (let [later    (day-task 1 {:created-at (LocalDateTime/of 2026 9 21 0 0 0)})
+        much-later (day-task 2 {:created-at (LocalDateTime/of 2026 9 28 12 0 0)})]
+    (is (= {:done [] :dropped [] :open []} (logic.task/day-sections [later much-later] day)))))
+
+(deftest day-sections-leaves-out-a-task-finished-before-the-day
+  (let [done    (day-task 1 {:status :done :finish-date (LocalDate/of 2026 9 19)
+                             :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+        dropped (day-task 2 {:status :dropped :finish-date (LocalDate/of 2026 9 1)
+                             :created-at (LocalDateTime/of 2026 8 30 9 0 0)})]
+    (is (= {:done [] :dropped [] :open []} (logic.task/day-sections [done dropped] day)))))
+
+(deftest day-sections-reads-a-task-finished-after-the-day-as-open-on-the-day
+  (let [done-later (day-task 1 {:status :done :finish-date (LocalDate/of 2026 9 22)
+                                :created-at (LocalDateTime/of 2026 9 10 9 0 0)})]
+    (is (= {:done [] :dropped [] :open [done-later]} (logic.task/day-sections [done-later] day)))))
+
+(deftest day-sections-reads-a-task-reopened-after-the-day-as-open
+  (let [done     (day-task 1 {:status :done :finish-date day :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+        reopened (assoc done :status :todo :finish-date nil)]
+    (is (= {:done [] :dropped [] :open [reopened]} (logic.task/day-sections [reopened] day)))
+    (is (= {:done [done] :dropped [] :open []} (logic.task/day-sections [done] day)))))
+
+(deftest day-sections-keeps-the-sections-disjoint
+  (let [created (LocalDateTime/of 2026 9 10 9 0 0)
+        done-1  (day-task 1 {:status :done :finish-date day :created-at created})
+        dropped (day-task 2 {:status :dropped :finish-date day :created-at created})
+        doing   (day-task 3 {:status :doing :created-at created})
+        done-4  (day-task 4 {:status :done :finish-date day :created-at (LocalDateTime/of 2026 9 20 23 59 59)})]
+    (is (= {:done [done-1 done-4] :dropped [dropped] :open [doing]}
+           (logic.task/day-sections [done-1 dropped doing done-4] day)))))
+
+(deftest day-sections-sorts-each-section-by-id
+  (let [created (LocalDateTime/of 2026 9 10 9 0 0)
+        done    #(day-task % {:status :done :finish-date day :created-at created})
+        dropped #(day-task % {:status :dropped :finish-date day :created-at created})
+        todo    (day-task 7 {:status :todo :created-at created})
+        doing   (day-task 5 {:status :doing :created-at created})]
+    (is (= {:done    [(done 2) (done 6) (done 9)]
+            :dropped [(dropped 3) (dropped 8)]
+            :open    [doing todo]}
+           (logic.task/day-sections [(done 9) (dropped 3) todo (done 2) (dropped 8) doing (done 6)] day)))))
+
+(deftest day-sections-keeps-a-subtask-in-the-section-of-its-own-status
+  (let [created (LocalDateTime/of 2026 9 10 9 0 0)
+        parent  (day-task 1 {:status :doing :created-at created})
+        child   (day-task 2 {:parent-id 1 :status :done :finish-date day :created-at created})]
+    (is (= {:done [child] :dropped [] :open [parent]}
+           (logic.task/day-sections [parent child] day)))))
+
+(deftest day-sections-of-no-tasks-is-three-empty-sections
+  (is (= {:done [] :dropped [] :open []} (logic.task/day-sections [] day))))
