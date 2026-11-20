@@ -53,6 +53,43 @@
     (is (map? (:error/details result)))
     (is (some #(= "fri" %) (vals (:error/details result))))))
 
+(deftest args->changes-builds-only-the-fields-that-were-given
+  (is (= {:title "new name"} (adapters.task/args->changes {:title "new name"} today)))
+  (is (= {:due-date (LocalDate/of 2026 9 29)} (adapters.task/args->changes {:due "tomorrow"} today)))
+  (is (= {:note "buy milk"} (adapters.task/args->changes {:note "buy milk"} today))))
+
+(deftest args->changes-turns-an-empty-note-into-a-nil-note
+  (is (= {:note nil} (adapters.task/args->changes {:note ""} today))))
+
+(deftest args->changes-turns-clear-due-into-a-nil-due-date
+  (is (= {:due-date nil} (adapters.task/args->changes {:clear-due true} today))))
+
+(deftest args->changes-combines-several-options
+  (is (= {:title "x" :note nil :due-date nil}
+         (adapters.task/args->changes {:title "x" :note "" :clear-due true} today)))
+  (is (= {:title "x" :note "n" :due-date (LocalDate/of 2026 10 1)}
+         (adapters.task/args->changes {:title "x" :note "n" :due "+3d"} today))))
+
+(deftest args->changes-reports-nothing-to-edit
+  (doseq [opts [{} {:clear-due false}]]
+    (testing (pr-str opts)
+      (is (= {:error/code :validation/nothing-to-edit :error/details {}}
+             (adapters.task/args->changes opts today))))))
+
+(deftest args->changes-reports-conflicting-flags
+  (is (= {:error/code :validation/conflicting-flags :error/details {}}
+         (adapters.task/args->changes {:due "tomorrow" :clear-due true :title "x"} today))))
+
+(deftest args->changes-reports-a-blank-title
+  (doseq [title ["" "   "]]
+    (testing (pr-str title)
+      (is (= {:error/code :validation/missing-title :error/details {}}
+             (adapters.task/args->changes {:title title} today))))))
+
+(deftest args->changes-reports-a-bad-date
+  (is (= {:error/code :validation/bad-date :error/details {:input "fri"}}
+         (adapters.task/args->changes {:due "fri"} today))))
+
 (deftest row->task-builds-a-task-from-a-snake-case-row
   (is (= {:id          4
           :parent-id   2

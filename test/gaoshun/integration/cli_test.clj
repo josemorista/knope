@@ -638,15 +638,18 @@
 
 (deftest help-prints-the-usage-with-descriptions-in-one-column
   (is (= {:exit 0
-          :out  (str "Usage: gaoshun <command> [options]\n"
-                     "\n"
-                     "Commands:\n"
-                     "  add <title> [--due DATE] [--note TEXT] [--parent ID]  Add a task, or a subtask of ID.\n"
-                     "  list [--all] [--page N]                               Show pending tasks, 50 per page; --all includes closed ones.\n"
-                     "  start ID                                              Mark a task as in progress.\n"
-                     "  done ID                                               Mark a task as done.\n"
-                     "  drop ID                                               Mark a task as dropped.\n"
-                     "  reopen ID                                             Move a done or dropped task back to todo.\n")
+          :out  "Usage: gaoshun <command> [options]
+
+Commands:
+  add <title> [--due DATE] [--note TEXT] [--parent ID]          Add a task, or a subtask of ID.
+  list [--all] [--page N]                                       Show pending tasks, 50 per page; --all includes closed ones.
+  start ID                                                      Mark a task as in progress.
+  done ID                                                       Mark a task as done.
+  drop ID                                                       Mark a task as dropped.
+  reopen ID                                                     Move a done or dropped task back to todo.
+  edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]  Change a task's title, due date or note.
+  rm ID [--force]                                               Delete a task; --force also deletes its subtasks.
+"
           :err  ""}
          (run "--help"))))
 
@@ -661,3 +664,271 @@
     (is (not (str/includes? parent "\u001b[31m")))
     (is (= (str "\u001b[2m" plain-parent "\u001b[0m") parent))
     (is (= plain (str/replace colored ansi "")))))
+
+(defn- edit-seed!
+  "Stores a doing task with a note and a due date, so an edit shows which
+  fields it leaves alone."
+  []
+  (insert! {:title "Write report" :note "old note" :status :doing :due-date (LocalDate/of 2026 10 5)}))
+
+(defn- edit-row
+  "The stored row of the task made by edit-seed!, with the given columns replaced."
+  [changes]
+  (merge {:id          1
+          :parent_id   nil
+          :title       "Write report"
+          :note        "old note"
+          :status      "doing"
+          :created_at  "2026-09-28T12:00:00"
+          :due_date    "2026-10-05"
+          :finish_date nil}
+         changes))
+
+(def ^:private updated-task-1 {:exit 0 :out "Updated task 1.\n" :err ""})
+
+(deftest edit-changes-the-title-and-leaves-every-other-field
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "1" "--title" "new name")))
+  (is (= [(edit-row {:title "new name"})] (rows))))
+
+(deftest edit-changes-the-due-date
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "1" "--due" "tomorrow")))
+  (is (= [(edit-row {:due_date "2026-09-29"})] (rows))))
+
+(deftest edit-sets-a-due-date-on-a-task-without-one
+  (insert! {})
+  (is (= updated-task-1 (run "edit" "1" "--due" "2026-11-01")))
+  (is (= [(assoc (task-row "todo" nil) :due_date "2026-11-01")] (rows))))
+
+(deftest edit-changes-the-note
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "1" "--note" "buy milk")))
+  (is (= [(edit-row {:note "buy milk"})] (rows))))
+
+(deftest edit-with-an-empty-note-clears-the-note
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "1" "--note" "")))
+  (is (= [(edit-row {:note nil})] (rows))))
+
+(deftest edit-with-clear-due-removes-the-due-date
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "1" "--clear-due")))
+  (is (= [(edit-row {:due_date nil})] (rows))))
+
+(deftest edit-applies-several-options-at-once
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "1" "--title" "new name" "--note" "" "--clear-due")))
+  (is (= [(edit-row {:title "new name" :note nil :due_date nil})] (rows)))
+  (is (= updated-task-1 (run "edit" "1" "--due" "+3d" "--note" "later")))
+  (is (= [(edit-row {:title "new name" :note "later" :due_date "2026-10-01"})] (rows))))
+
+(deftest edit-takes-the-options-before-the-id
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "--title" "new name" "1")))
+  (is (= [(edit-row {:title "new name"})] (rows))))
+
+(deftest edit-accepts-a-negative-offset-as-a-due-value
+  (edit-seed!)
+  (is (= updated-task-1 (run "edit" "1" "--due" "-2d")))
+  (is (= [(edit-row {:due_date "2026-09-26"})] (rows))))
+
+(deftest edit-leaves-status-finish-date-parent-and-other-tasks-alone
+  (insert! {:title "Parent"})
+  (insert! {:title "Step" :parent-id 1 :status :done :note "n" :due-date (LocalDate/of 2026 10 5)})
+  (insert! {:title "Other"})
+  (let [[parent _ other] (rows)]
+    (is (= {:exit 0 :out "Updated task 2.\n" :err ""} (run "edit" "2" "--title" "Renamed step")))
+    (is (= [parent
+            {:id          2
+             :parent_id   1
+             :title       "Renamed step"
+             :note        "n"
+             :status      "done"
+             :created_at  "2026-09-28T12:00:00"
+             :due_date    "2026-10-05"
+             :finish_date "2026-09-28"}
+            other]
+           (rows)))))
+
+(deftest edit-with-no-options-is-refused-and-changes-nothing
+  (edit-seed!)
+  (let [before (rows)]
+    (is (= {:exit 1 :out "" :err "Nothing to change. Pass --title, --due, --note or --clear-due.\n"}
+           (run "edit" "1")))
+    (is (= before (rows)))))
+
+(deftest edit-with-a-due-date-and-clear-due-is-refused-and-changes-nothing
+  (edit-seed!)
+  (let [before (rows)]
+    (is (= {:exit 1 :out "" :err "--due and --clear-due can't be used together.\n"}
+           (run "edit" "1" "--due" "tomorrow" "--clear-due")))
+    (is (= {:exit 1 :out "" :err "--due and --clear-due can't be used together.\n"}
+           (run "edit" "1" "--clear-due" "--title" "new name" "--due" "2026-11-01")))
+    (is (= before (rows)))))
+
+(deftest edit-with-a-blank-title-is-refused-and-changes-nothing
+  (edit-seed!)
+  (let [before (rows)]
+    (doseq [title ["" "   "]]
+      (testing (pr-str title)
+        (is (= {:exit 1 :out "" :err "A task needs a title.\n"}
+               (run "edit" "1" "--title" title)))))
+    (is (= before (rows)))))
+
+(deftest edit-with-an-unreadable-date-is-refused-and-changes-nothing
+  (edit-seed!)
+  (let [before (rows)]
+    (is (= {:exit 1
+            :out  ""
+            :err  "Can't read date 'fri'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.\n"}
+           (run "edit" "1" "--due" "fri")))
+    (is (= before (rows)))))
+
+(deftest edit-with-an-unquoted-multi-word-value-is-refused-and-changes-nothing
+  (edit-seed!)
+  (let [before (rows)]
+    (is (= (extra-argument "name") (run "edit" "1" "--title" "new" "name")))
+    (is (= (extra-argument "milk") (run "edit" "1" "--note" "buy" "milk")))
+    (is (= before (rows)))))
+
+(deftest edit-with-an-unknown-option-is-refused-and-changes-nothing
+  (edit-seed!)
+  (let [before (rows)]
+    (is (= (unknown-option "bogus") (run "edit" "1" "--bogus" "x")))
+    (is (= (unknown-option "parent") (run "edit" "1" "--parent" "2")))
+    (is (= (unknown-option "status") (run "edit" "1" "--status" "done")))
+    (is (= before (rows)))))
+
+(deftest edit-reports-the-shape-before-any-value
+  (edit-seed!)
+  (let [before (rows)]
+    (is (= (unknown-option "bogus") (run "edit" "1" "--title" "" "--bogus" "x")))
+    (is (= (extra-argument "milk") (run "edit" "1" "--due" "fri" "--note" "buy" "milk")))
+    (is (= (extra-argument "4") (run "edit" "abc" "--title" "x" "4")))
+    (is (= before (rows)))))
+
+(deftest edit-on-an-unknown-id-fails
+  (edit-seed!)
+  (let [before (rows)]
+    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "edit" "99" "--title" "x")))
+    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "edit" "99" "--clear-due")))
+    (is (= before (rows)))))
+
+(deftest edit-with-a-bad-id-fails
+  (edit-seed!)
+  (let [before (rows)]
+    (doseq [input ["abc" "0" "-1"]]
+      (testing input
+        (is (= {:exit 1 :out "" :err (str "'" input "' is not a task id.\n")}
+               (run "edit" input "--title" "x")))))
+    (is (= before (rows)))))
+
+(deftest edit-without-an-id-prints-usage-and-exits-one
+  (is (= {:exit 1 :out "" :err @#'cli/usage} (run "edit"))))
+
+(defn- seed-family!
+  "Two other tasks (the first with a subtask), then task 3 with n subtasks, then an unrelated task.
+  Returns the stored rows."
+  [n]
+  (insert! {:title "Other parent"})
+  (insert! {:title "Other step" :parent-id 1 :note "keep me" :due-date (LocalDate/of 2026 10 5)})
+  (insert! {:title "Parent" :status :doing})
+  (dotimes [i n]
+    (insert! {:title (str "Step " (inc i)) :parent-id 3 :status (if (even? i) :todo :done)}))
+  (insert! {:title "Unrelated" :due-date (LocalDate/of 2026 10 1)})
+  (rows))
+
+(defn- without-family
+  "The rows left once task 3 and its subtasks are gone."
+  [before]
+  (vec (remove #(or (= 3 (:id %)) (= 3 (:parent_id %))) before)))
+
+(deftest rm-deletes-a-task-without-subtasks
+  (insert! {:title "Keep" :note "n"})
+  (insert! {:title "Typo"})
+  (insert! {:title "Also keep" :due-date (LocalDate/of 2026 10 1)})
+  (let [[keep _ also-keep] (rows)]
+    (is (= {:exit 0 :out "Deleted task 2.\n" :err ""} (run "rm" "2")))
+    (is (= [keep also-keep] (rows)))))
+
+(deftest rm-deletes-the-only-task
+  (insert! {})
+  (is (= {:exit 0 :out "Deleted task 1.\n" :err ""} (run "rm" "1")))
+  (is (= [] (rows))))
+
+(deftest rm-deletes-one-subtask-and-leaves-its-parent-and-siblings
+  (let [before (seed-family! 2)]
+    (is (= 6 (count before)))
+    (is (= {:exit 0 :out "Deleted task 4.\n" :err ""} (run "rm" "4")))
+    (is (= (vec (remove #(= 4 (:id %)) before)) (rows)))))
+
+(deftest rm-of-a-parent-without-force-is-refused-and-deletes-nothing
+  (let [before (seed-family! 2)]
+    (is (= 6 (count before)))
+    (is (= {:exit 1 :out "" :err "Task 3 has 2 subtasks. Use --force to delete them too.\n"}
+           (run "rm" "3")))
+    (is (= before (rows)))))
+
+(deftest rm-of-a-parent-with-one-subtask-reads-in-the-singular
+  (let [before (seed-family! 1)]
+    (is (= 5 (count before)))
+    (is (= {:exit 1 :out "" :err "Task 3 has 1 subtask. Use --force to delete it too.\n"}
+           (run "rm" "3")))
+    (is (= before (rows)))))
+
+(deftest rm-of-a-parent-with-an-all-closed-family-still-needs-force
+  (insert! {:title "Parent" :status :done})
+  (insert! {:title "Step" :parent-id 1 :status :dropped})
+  (let [before (rows)]
+    (is (= {:exit 1 :out "" :err "Task 1 has 1 subtask. Use --force to delete it too.\n"}
+           (run "rm" "1")))
+    (is (= before (rows)))))
+
+(deftest rm-with-force-after-the-id-deletes-the-parent-and-its-subtasks
+  (let [before (seed-family! 2)]
+    (is (= {:exit 0 :out "Deleted task 3 and 2 subtasks.\n" :err ""} (run "rm" "3" "--force")))
+    (is (= (without-family before) (rows)))
+    (is (= [1 2 6] (mapv :id (rows))))))
+
+(deftest rm-with-force-before-the-id-deletes-the-parent-and-its-subtasks
+  (let [before (seed-family! 2)]
+    (is (= {:exit 0 :out "Deleted task 3 and 2 subtasks.\n" :err ""} (run "rm" "--force" "3")))
+    (is (= (without-family before) (rows)))
+    (is (= [1 2 6] (mapv :id (rows))))))
+
+(deftest forced-rm-of-a-parent-with-one-subtask-reads-in-the-singular-with-force-after-the-id
+  (let [before (seed-family! 1)]
+    (is (= 5 (count before)))
+    (is (= {:exit 0 :out "Deleted task 3 and 1 subtask.\n" :err ""} (run "rm" "3" "--force")))
+    (is (= (without-family before) (rows)))
+    (is (= [1 2 5] (mapv :id (rows))))))
+
+(deftest forced-rm-of-a-parent-with-one-subtask-reads-in-the-singular-with-force-before-the-id
+  (let [before (seed-family! 1)]
+    (is (= 5 (count before)))
+    (is (= {:exit 0 :out "Deleted task 3 and 1 subtask.\n" :err ""} (run "rm" "--force" "3")))
+    (is (= (without-family before) (rows)))
+    (is (= [1 2 5] (mapv :id (rows))))))
+
+(deftest forced-rm-of-a-task-without-subtasks-deletes-just-that-task
+  (let [before (seed-family! 0)]
+    (is (= 4 (count before)))
+    (is (= {:exit 0 :out "Deleted task 3.\n" :err ""} (run "rm" "3" "--force")))
+    (is (= (without-family before) (rows)))))
+
+(deftest rm-on-an-unknown-id-fails-and-deletes-nothing
+  (let [before (seed-family! 2)]
+    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "rm" "99")))
+    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "rm" "99" "--force")))
+    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "rm" "--force" "99")))
+    (is (= before (rows)))))
+
+(deftest every-command-that-takes-an-id-says-not-found-for-a-missing-task
+  (insert! {})
+  (let [before (rows)]
+    (doseq [argv [["start" "99"] ["done" "99"] ["drop" "99"] ["reopen" "99"]
+                  ["edit" "99" "--title" "x"] ["rm" "99"]]]
+      (testing (pr-str argv)
+        (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (apply run argv)))))
+    (is (= before (rows)))))
