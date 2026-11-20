@@ -17,3 +17,6 @@
 # OS and editor noise
 .DS_Store
 *.swp
+
+# Build output
+target/

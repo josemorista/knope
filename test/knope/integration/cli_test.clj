@@ -19,7 +19,7 @@
   (sqlite/query helpers/*db-path* ["SELECT * FROM tasks ORDER BY id"]))
 
 (deftest add-prints-the-new-id-and-stores-a-todo
-  (is (= {:exit 0 :out "Added task 1.\n" :err ""} (run "add" "x")))
+  (is (= {:exit 0 :out "Task 1 is on the list! I've already started a binder for it.\n" :err ""} (run "add" "x")))
   (is (= [{:id          1
            :parent_id   nil
            :title       "x"
@@ -31,11 +31,11 @@
          (rows))))
 
 (deftest add-numbers-tasks-in-order
-  (is (= "Added task 1.\n" (:out (run "add" "first"))))
-  (is (= "Added task 2.\n" (:out (run "add" "second")))))
+  (is (= "Task 1 is on the list! I've already started a binder for it.\n" (:out (run "add" "first"))))
+  (is (= "Task 2 is on the list! I've already started a binder for it.\n" (:out (run "add" "second")))))
 
 (deftest add-with-due-tomorrow-stores-the-date
-  (is (= {:exit 0 :out "Added task 1.\n" :err ""}
+  (is (= {:exit 0 :out "Task 1 is on the list! I've already started a binder for it.\n" :err ""}
          (run "add" "Write report" "--due" "tomorrow")))
   (is (= [{:id          1
            :parent_id   nil
@@ -52,7 +52,7 @@
   (is (= ["2026-10-05"] (map :due_date (rows)))))
 
 (deftest add-accepts-a-negative-offset-as-a-due-value
-  (is (= {:exit 0 :out "Added task 1.\n" :err ""} (run "add" "x" "--due" "-2d")))
+  (is (= {:exit 0 :out "Task 1 is on the list! I've already started a binder for it.\n" :err ""} (run "add" "x" "--due" "-2d")))
   (is (= ["2026-09-26"] (map :due_date (rows)))))
 
 (deftest add-accepts-a-positive-offset-as-a-due-value
@@ -110,7 +110,7 @@
 (deftest main-adds-a-task-and-exits-zero
   (let [{:keys [exit out]} (bb-main helpers/*db-path* "add" "x")]
     (is (= 0 exit))
-    (is (= "Added task 1.\n" out))
+    (is (= "Task 1 is on the list! I've already started a binder for it.\n" out))
     (is (= ["x"] (map :title (rows))))))
 
 (deftest main-exits-one-with-the-message-on-stderr
@@ -183,11 +183,11 @@
                        ["[x]" "2" "Done early"]])))
 
 (deftest list-with-nothing-pending-says-so-and-exits-zero
-  (is (= {:exit 0 :out "Nothing pending.\n" :err ""} (run "list"))))
+  (is (= {:exit 0 :out "Nothing pending. Go get some waffles, you've earned them.\n" :err ""} (run "list"))))
 
 (deftest list-with-only-closed-tasks-says-nothing-pending
   (insert! {:title "Finished" :status :done})
-  (is (= {:exit 0 :out "Nothing pending.\n" :err ""} (run "list"))))
+  (is (= {:exit 0 :out "Nothing pending. Go get some waffles, you've earned them.\n" :err ""} (run "list"))))
 
 (deftest list-without-color-has-no-escape-codes
   (run "add" "Pay rent" "--due" "-2d")
@@ -236,8 +236,8 @@
 
 (deftest list-past-the-last-page-says-nothing-pending
   (add-open-tasks! 3)
-  (is (= {:exit 0 :out "Nothing pending.\n" :err ""} (run "list" "--page" "1")))
-  (is (= {:exit 0 :out "Nothing pending.\n" :err ""} (run "list" "--all" "--page" "4"))))
+  (is (= {:exit 0 :out "Nothing pending. Go get some waffles, you've earned them.\n" :err ""} (run "list" "--page" "1")))
+  (is (= {:exit 0 :out "Nothing pending. Go get some waffles, you've earned them.\n" :err ""} (run "list" "--all" "--page" "4"))))
 
 (deftest list-all-pages-closed-tasks-and-keeps-all-in-the-pointer
   (add-open-tasks! 50)
@@ -259,7 +259,7 @@
 
 (deftest add-with-a-parent-stores-a-subtask
   (run "add" "Parent")
-  (is (= {:exit 0 :out "Added task 2.\n" :err ""} (run "add" "step" "--parent" "1")))
+  (is (= {:exit 0 :out "Task 2 is on the list! I've already started a binder for it.\n" :err ""} (run "add" "step" "--parent" "1")))
   (is (= [nil 1] (map :parent_id (rows)))))
 
 (deftest add-with-a-parent-that-is-a-subtask-fails
@@ -435,19 +435,19 @@
 
 (deftest start-moves-a-todo-task-to-doing
   (insert! {})
-  (is (= {:exit 0 :out "Task 1 started.\n" :err ""} (run "start" "1")))
+  (is (= {:exit 0 :out "Task 1 is in progress. Let's make Pawnee proud!\n" :err ""} (run "start" "1")))
   (is (= [(task-row "doing" nil)] (rows))))
 
 (deftest start-on-a-doing-task-says-so-and-changes-nothing
   (insert! {:status :doing})
-  (is (= {:exit 0 :out "Task 1 is already in progress.\n" :err ""} (run "start" "1")))
+  (is (= {:exit 0 :out "Task 1 is already in progress. I love the enthusiasm.\n" :err ""} (run "start" "1")))
   (is (= [(task-row "doing" nil)] (rows))))
 
 (deftest done-closes-an-open-task-with-the-clock-date
   (doseq [status [:todo :doing]]
     (testing status
       (insert! {:status status})
-      (is (= {:exit 0 :out "Task 1 marked done.\n" :err ""} (run "done" "1")))
+      (is (= {:exit 0 :out "Task 1 is DONE! This calls for waffles.\n" :err ""} (run "done" "1")))
       (is (= [(task-row "done" "2026-09-28")] (rows)))
       (sqlite/execute! helpers/*db-path* ["DELETE FROM tasks"])
       (sqlite/execute! helpers/*db-path* ["DELETE FROM sqlite_sequence WHERE name = 'tasks'"]))))
@@ -455,13 +455,13 @@
 (deftest a-repeated-done-keeps-the-original-finish-date
   (insert! {})
   (run "done" "1")
-  (is (= {:exit 0 :out "Task 1 is already done.\n" :err ""}
+  (is (= {:exit 0 :out "Task 1 is already done. You can't finish it twice, but I admire the spirit.\n" :err ""}
          (run-on (LocalDateTime/of 2026 10 5 9 0 0) "done" "1")))
   (is (= [(task-row "done" "2026-09-28")] (rows))))
 
 (deftest drop-closes-an-open-task-with-the-clock-date
   (insert! {:status :doing})
-  (is (= {:exit 0 :out "Task 1 dropped.\n" :err ""} (run "drop" "1")))
+  (is (= {:exit 0 :out "Task 1 is dropped. Knowing your priorities is strong leadership.\n" :err ""} (run "drop" "1")))
   (is (= [(task-row "dropped" "2026-09-28")] (rows))))
 
 (deftest a-repeated-drop-keeps-the-original-finish-date
@@ -475,14 +475,14 @@
   (doseq [status [:done :dropped]]
     (testing status
       (insert! {:status status})
-      (is (= {:exit 0 :out "Task 1 reopened.\n" :err ""} (run "reopen" "1")))
+      (is (= {:exit 0 :out "Task 1 is back on the list. Everyone deserves a second chance.\n" :err ""} (run "reopen" "1")))
       (is (= [(task-row "todo" nil)] (rows)))
       (sqlite/execute! helpers/*db-path* ["DELETE FROM tasks"])
       (sqlite/execute! helpers/*db-path* ["DELETE FROM sqlite_sequence WHERE name = 'tasks'"]))))
 
 (deftest reopen-on-an-open-task-says-so-and-changes-nothing
   (insert! {:status :doing})
-  (is (= {:exit 0 :out "Task 1 is already open.\n" :err ""} (run "reopen" "1")))
+  (is (= {:exit 0 :out "Task 1 is already open and waiting for you.\n" :err ""} (run "reopen" "1")))
   (is (= [(task-row "doing" nil)] (rows))))
 
 (deftest an-illegal-move-fails-and-changes-nothing
@@ -513,7 +513,7 @@
 (deftest done-on-a-parent-with-an-open-subtask-shows-it-as-a-dimmed-header
   (run "add" "Parent")
   (run "add" "Step" "--parent" "1")
-  (is (= {:exit 0 :out "Task 1 marked done.\n" :err ""} (run "done" "1")))
+  (is (= {:exit 0 :out "Task 1 is DONE! This calls for waffles.\n" :err ""} (run "done" "1")))
   (let [{:keys [exit out err]} (run "list")
         colored               (:out (cli/run helpers/*components* {:color? true} ["list"]))
         header                (or (first (filter #(str/includes? % "Parent") (str/split-lines colored))) "")]
@@ -546,8 +546,8 @@
   (is (empty? (rows))))
 
 (deftest add-with-quoted-multi-word-text-stores-it-whole
-  (is (= {:exit 0 :out "Added task 1.\n" :err ""} (run "add" "buy milk")))
-  (is (= {:exit 0 :out "Added task 2.\n" :err ""} (run "add" "x" "--note" "buy milk")))
+  (is (= {:exit 0 :out "Task 1 is on the list! I've already started a binder for it.\n" :err ""} (run "add" "buy milk")))
+  (is (= {:exit 0 :out "Task 2 is on the list! I've already started a binder for it.\n" :err ""} (run "add" "x" "--note" "buy milk")))
   (is (= [{:id          1
            :parent_id   nil
            :title       "buy milk"
@@ -683,7 +683,7 @@ Commands:
           :finish_date nil}
          changes))
 
-(def ^:private updated-task-1 {:exit 0 :out "Updated task 1.\n" :err ""})
+(def ^:private updated-task-1 {:exit 0 :out "Task 1 is updated. Revisions make a plan stronger.\n" :err ""})
 
 (deftest edit-changes-the-title-and-leaves-every-other-field
   (edit-seed!)
@@ -737,7 +737,7 @@ Commands:
   (insert! {:title "Step" :parent-id 1 :status :done :note "n" :due-date (LocalDate/of 2026 10 5)})
   (insert! {:title "Other"})
   (let [[parent _ other] (rows)]
-    (is (= {:exit 0 :out "Updated task 2.\n" :err ""} (run "edit" "2" "--title" "Renamed step")))
+    (is (= {:exit 0 :out "Task 2 is updated. Revisions make a plan stronger.\n" :err ""} (run "edit" "2" "--title" "Renamed step")))
     (is (= [parent
             {:id          2
              :parent_id   1
@@ -848,18 +848,18 @@ Commands:
   (insert! {:title "Typo"})
   (insert! {:title "Also keep" :due-date (LocalDate/of 2026 10 1)})
   (let [[keep _ also-keep] (rows)]
-    (is (= {:exit 0 :out "Deleted task 2.\n" :err ""} (run "rm" "2")))
+    (is (= {:exit 0 :out "Task 2 is gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "2")))
     (is (= [keep also-keep] (rows)))))
 
 (deftest rm-deletes-the-only-task
   (insert! {})
-  (is (= {:exit 0 :out "Deleted task 1.\n" :err ""} (run "rm" "1")))
+  (is (= {:exit 0 :out "Task 1 is gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "1")))
   (is (= [] (rows))))
 
 (deftest rm-deletes-one-subtask-and-leaves-its-parent-and-siblings
   (let [before (seed-family! 2)]
     (is (= 6 (count before)))
-    (is (= {:exit 0 :out "Deleted task 4.\n" :err ""} (run "rm" "4")))
+    (is (= {:exit 0 :out "Task 4 is gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "4")))
     (is (= (vec (remove #(= 4 (:id %)) before)) (rows)))))
 
 (deftest rm-of-a-parent-without-force-is-refused-and-deletes-nothing
@@ -886,34 +886,34 @@ Commands:
 
 (deftest rm-with-force-after-the-id-deletes-the-parent-and-its-subtasks
   (let [before (seed-family! 2)]
-    (is (= {:exit 0 :out "Deleted task 3 and 2 subtasks.\n" :err ""} (run "rm" "3" "--force")))
+    (is (= {:exit 0 :out "Task 3 and its 2 subtasks are gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "3" "--force")))
     (is (= (without-family before) (rows)))
     (is (= [1 2 6] (mapv :id (rows))))))
 
 (deftest rm-with-force-before-the-id-deletes-the-parent-and-its-subtasks
   (let [before (seed-family! 2)]
-    (is (= {:exit 0 :out "Deleted task 3 and 2 subtasks.\n" :err ""} (run "rm" "--force" "3")))
+    (is (= {:exit 0 :out "Task 3 and its 2 subtasks are gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "--force" "3")))
     (is (= (without-family before) (rows)))
     (is (= [1 2 6] (mapv :id (rows))))))
 
 (deftest forced-rm-of-a-parent-with-one-subtask-reads-in-the-singular-with-force-after-the-id
   (let [before (seed-family! 1)]
     (is (= 5 (count before)))
-    (is (= {:exit 0 :out "Deleted task 3 and 1 subtask.\n" :err ""} (run "rm" "3" "--force")))
+    (is (= {:exit 0 :out "Task 3 and its subtask are gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "3" "--force")))
     (is (= (without-family before) (rows)))
     (is (= [1 2 5] (mapv :id (rows))))))
 
 (deftest forced-rm-of-a-parent-with-one-subtask-reads-in-the-singular-with-force-before-the-id
   (let [before (seed-family! 1)]
     (is (= 5 (count before)))
-    (is (= {:exit 0 :out "Deleted task 3 and 1 subtask.\n" :err ""} (run "rm" "--force" "3")))
+    (is (= {:exit 0 :out "Task 3 and its subtask are gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "--force" "3")))
     (is (= (without-family before) (rows)))
     (is (= [1 2 5] (mapv :id (rows))))))
 
 (deftest forced-rm-of-a-task-without-subtasks-deletes-just-that-task
   (let [before (seed-family! 0)]
     (is (= 4 (count before)))
-    (is (= {:exit 0 :out "Deleted task 3.\n" :err ""} (run "rm" "3" "--force")))
+    (is (= {:exit 0 :out "Task 3 is gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "3" "--force")))
     (is (= (without-family before) (rows)))))
 
 (deftest rm-on-an-unknown-id-fails-and-deletes-nothing
@@ -985,23 +985,23 @@ Commands:
            (run "day" "2026-09-21")))))
 
 (deftest day-with-nothing-recorded-says-so-and-exits-zero
-  (is (= {:exit 0 :out "Nothing recorded for 2026-09-20.\n" :err ""}
+  (is (= {:exit 0 :out "Nothing recorded for 2026-09-20. Even public servants need a day off.\n" :err ""}
          (run "day" "2026-09-20"))))
 
 (deftest day-says-nothing-was-recorded-when-every-task-falls-outside-the-day
   (insert! {:title "Created later" :created-at (LocalDateTime/of 2026 9 22 9 0 0)})
   (insert! {:title "Finished earlier" :status :done :finish-date (LocalDate/of 2026 9 18)
             :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
-  (is (= {:exit 0 :out "Nothing recorded for 2026-09-20.\n" :err ""}
+  (is (= {:exit 0 :out "Nothing recorded for 2026-09-20. Even public servants need a day off.\n" :err ""}
          (run "day" "2026-09-20"))))
 
 (deftest day-reads-a-task-reopened-after-its-finish-day-as-open-on-that-day
   (insert! {:title "Ship release notes" :created-at (LocalDateTime/of 2026 9 15 9 0 0)})
-  (is (= {:exit 0 :out "Task 1 marked done.\n" :err ""}
+  (is (= {:exit 0 :out "Task 1 is DONE! This calls for waffles.\n" :err ""}
          (run-on (LocalDateTime/of 2026 9 20 9 0 0) "done" "1")))
   (is (= {:exit 0 :out "2026-09-20\nDone\n  [x] 1 Ship release notes\n" :err ""}
          (run "day" "2026-09-20")))
-  (is (= {:exit 0 :out "Task 1 reopened.\n" :err ""}
+  (is (= {:exit 0 :out "Task 1 is back on the list. Everyone deserves a second chance.\n" :err ""}
          (run-on (LocalDateTime/of 2026 9 22 9 0 0) "reopen" "1")))
   (is (= {:exit 0 :out "2026-09-20\nOpen\n  [ ] 1 Ship release notes\n" :err ""}
          (run "day" "2026-09-20"))))
@@ -1060,7 +1060,7 @@ Commands:
 
 (deftest search-does-not-match-inside-a-word
   (insert! {:title "Authentication service"})
-  (is (= {:exit 0 :out "No matches.\n" :err ""}
+  (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""}
          (run "search" "thentication"))))
 
 (deftest search-finds-a-note-written-with-accents-from-the-unaccented-word
@@ -1119,11 +1119,11 @@ Commands:
 (deftest search-with-no-match-says-so-and-exits-zero
   (insert! {:title "Authentication service"})
   (is (= "[ ] 1 Authentication service\n" (:out (run "search" "auth"))))
-  (is (= {:exit 0 :out "No matches.\n" :err ""} (run "search" "billing")))
-  (is (= {:exit 0 :out "No matches.\n" :err ""} (run "search" "auth billing"))))
+  (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""} (run "search" "billing")))
+  (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""} (run "search" "auth billing"))))
 
 (deftest search-on-an-empty-database-says-no-matches
-  (is (= {:exit 0 :out "No matches.\n" :err ""} (run "search" "auth"))))
+  (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""} (run "search" "auth"))))
 
 (deftest search-runs-a-word-that-mixes-punctuation-and-letters
   (insert! {:title "auth.svc rollout"})
@@ -1157,14 +1157,14 @@ Commands:
   (is (= (unknown-option "bogus") (run "search" "auth" "--bogus" "x"))))
 
 (deftest search-follows-an-edit-of-the-title-and-the-note
-  (is (= {:exit 0 :out "Added task 1.\n" :err ""} (run "add" "Authentication service" "--note" "legacy")))
+  (is (= {:exit 0 :out "Task 1 is on the list! I've already started a binder for it.\n" :err ""} (run "add" "Authentication service" "--note" "legacy")))
   (is (= "[ ] 1 Authentication service\n" (:out (run "search" "auth"))))
   (is (= "[ ] 1 Authentication service\n" (:out (run "search" "legacy"))))
-  (is (= {:exit 0 :out "Updated task 1.\n" :err ""}
+  (is (= {:exit 0 :out "Task 1 is updated. Revisions make a plan stronger.\n" :err ""}
          (run "edit" "1" "--title" "Billing report" "--note" "invoices")))
   (testing "the old words stop matching"
-    (is (= {:exit 0 :out "No matches.\n" :err ""} (run "search" "auth")))
-    (is (= {:exit 0 :out "No matches.\n" :err ""} (run "search" "legacy"))))
+    (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""} (run "search" "auth")))
+    (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""} (run "search" "legacy"))))
   (testing "the new words match"
     (is (= {:exit 0 :out "[ ] 1 Billing report\n" :err ""} (run "search" "billing")))
     (is (= {:exit 0 :out "[ ] 1 Billing report\n" :err ""} (run "search" "invoices")))))
@@ -1174,18 +1174,18 @@ Commands:
   (run "add" "Authentication docs")
   (is (= "[ ] 1 Authentication service\n[ ] 2 Authentication docs\n"
          (:out (run "search" "auth"))))
-  (is (= {:exit 0 :out "Deleted task 1.\n" :err ""} (run "rm" "1")))
+  (is (= {:exit 0 :out "Task 1 is gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "1")))
   (is (= {:exit 0 :out "[ ] 2 Authentication docs\n" :err ""} (run "search" "auth")))
-  (is (= {:exit 0 :out "Deleted task 2.\n" :err ""} (run "rm" "2")))
-  (is (= {:exit 0 :out "No matches.\n" :err ""} (run "search" "auth"))))
+  (is (= {:exit 0 :out "Task 2 is gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "2")))
+  (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""} (run "search" "auth"))))
 
 (deftest search-finds-nothing-after-a-forced-remove-of-a-parent-and-its-subtasks
   (run "add" "Authentication service")
   (run "add" "Authentication step" "--parent" "1")
-  (is (= {:exit 0 :out "Deleted task 1 and 1 subtask.\n" :err ""} (run "rm" "1" "--force")))
-  (is (= {:exit 0 :out "No matches.\n" :err ""} (run "search" "auth"))))
+  (is (= {:exit 0 :out "Task 1 and its subtask are gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "1" "--force")))
+  (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""} (run "search" "auth"))))
 
 (deftest search-still-finds-a-task-after-it-is-marked-done
   (run "add" "Authentication service")
-  (is (= {:exit 0 :out "Task 1 marked done.\n" :err ""} (run "done" "1")))
+  (is (= {:exit 0 :out "Task 1 is DONE! This calls for waffles.\n" :err ""} (run "done" "1")))
   (is (= {:exit 0 :out "[x] 1 Authentication service\n" :err ""} (run "search" "auth serv"))))

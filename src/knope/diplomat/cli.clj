@@ -55,7 +55,7 @@ Commands:
       (let [task (controllers.task/add! attrs components)]
         (if (:error/code task)
           (error-result task)
-          {:exit 0 :out (str "Added task " (:id task) ".\n") :err ""})))))
+          {:exit 0 :out (str "Task " (:id task) " is on the list! I've already started a binder for it.\n") :err ""})))))
 
 (defn- more-line [all? page]
   (str "More on page " (inc page) ": knope list " (when all? "--all ") "--page " (inc page)))
@@ -111,10 +111,14 @@ Commands:
     {:exit 1 :out "" :err usage}))
 
 (def ^:private transition-messages
-  {:start  {:applied "started" :unchanged "is already in progress"}
-   :done   {:applied "marked done" :unchanged "is already done"}
-   :drop   {:applied "dropped" :unchanged "is already dropped"}
-   :reopen {:applied "reopened" :unchanged "is already open"}})
+  {:start  {:applied   "Task %s is in progress. Let's make Pawnee proud!"
+            :unchanged "Task %s is already in progress. I love the enthusiasm."}
+   :done   {:applied   "Task %s is DONE! This calls for waffles."
+            :unchanged "Task %s is already done. You can't finish it twice, but I admire the spirit."}
+   :drop   {:applied   "Task %s is dropped. Knowing your priorities is strong leadership."
+            :unchanged "Task %s is already dropped."}
+   :reopen {:applied   "Task %s is back on the list. Everyone deserves a second chance."
+            :unchanged "Task %s is already open and waiting for you."}})
 
 (defn- transition [components command {:keys [opts] :as parsed}]
   (if-let [id-arg (:id opts)]
@@ -124,7 +128,7 @@ Commands:
         (let [{:keys [outcome task] :as result} (controllers.task/transition! id command components)]
           (if (:error/code result)
             (error-result result)
-            {:exit 0 :out (str "Task " (:id task) " " (get-in transition-messages [command outcome]) ".\n") :err ""}))))
+            {:exit 0 :out (str (format (get-in transition-messages [command outcome]) (:id task)) "\n") :err ""}))))
     (fallback parsed)))
 
 (defn- edit [components {:keys [opts] :as parsed}]
@@ -139,7 +143,7 @@ Commands:
         (let [task (controllers.task/edit! id changes components)]
           (if (:error/code task)
             (error-result task)
-            {:exit 0 :out (str "Updated task " (:id task) ".\n") :err ""}))))
+            {:exit 0 :out (str "Task " (:id task) " is updated. Revisions make a plan stronger.\n") :err ""}))))
     (fallback parsed)))
 
 (defn- rm [components {:keys [opts] :as parsed}]
@@ -151,10 +155,11 @@ Commands:
           (if (:error/code result)
             (error-result result)
             {:exit 0
-             :out  (str "Deleted task " id
-                        (when (pos? subtasks)
-                          (str " and " subtasks (if (= 1 subtasks) " subtask" " subtasks")))
-                        ".\n")
+             :out  (str (cond
+                          (zero? subtasks) (str "Task " id " is gone.")
+                          (= 1 subtasks)   (str "Task " id " and its subtask are gone.")
+                          :else            (str "Task " id " and its " subtasks " subtasks are gone."))
+                        " A good public servant knows when to let go.\n")
              :err  ""}))))
     (fallback parsed)))
 

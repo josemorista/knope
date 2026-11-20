@@ -24,7 +24,7 @@
   two spaces."
   [entries {:keys [color?]}]
   (if (empty? entries)
-    ["Nothing pending."]
+    ["Nothing pending. Go get some waffles, you've earned them."]
     (into []
           (mapcat (fn [{:keys [row children]}]
                     (cons (row-line row "" color?)
@@ -37,7 +37,7 @@
   [date {:keys [done dropped open]} {:keys [color?]}]
   (let [sections (remove (comp empty? second) [["Done" done] ["Dropped" dropped] ["Open" open]])]
     (if (empty? sections)
-      [(str "Nothing recorded for " date ".")]
+      [(str "Nothing recorded for " date ". Even public servants need a day off.")]
       (into [(str date)]
             (mapcat (fn [[heading rows]]
                       (cons heading (map #(row-line % "  " color?) rows))))
@@ -47,5 +47,5 @@
   "One line per display row, or a line saying nothing matched."
   [rows {:keys [color?]}]
   (if (empty? rows)
-    ["No matches."]
+    ["No matches. I checked every binder twice."]
     (mapv #(row-line % "" color?) rows)))

@@ -1,0 +1,32 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install babashka
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/babashka/babashka/v1.13.229/install -o install
+          sudo bash install --version 1.13.229
+
+      - name: Test
+        run: bb test
+
+      - name: Build
+        run: bb build
+
+      - name: Publish release
+        run: gh release create "$GITHUB_REF_NAME" target/knope.jar --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
