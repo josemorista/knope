@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [knope.adapters.task :as adapters.task]
             [knope.components :as components]
+            [knope.controllers.sync :as controllers.sync]
             [knope.controllers.task :as controllers.task]
             [knope.diplomat.cli.render :as render]))
 
@@ -21,6 +22,9 @@ Commands:
   rm ID [--force]                                               Delete a task; --force also deletes its subtasks.
   day [DATE]                                                    Show what was done, dropped and open on a day; today by default.
   search TEXT                                                   Find tasks whose title or note has every word as a prefix.
+  remote set <git-url>                                          Sync this database through a git remote, such as a gist.
+  push [--force]                                                Upload this database, encrypted; --force replaces newer remote changes.
+  pull [--force]                                                Replace this database with the remote's; --force discards local changes.
 ")
 
 (defn- error-message [{:error/keys [code details]}]
@@ -42,7 +46,23 @@ Commands:
     :validation/missing-value (str "--" (:option details) " needs a value.")
     :validation/unknown-option (str "Unknown option '" (:option details) "'.")
     :validation/extra-argument (str "Unexpected argument '" (:input details)
-                                    "'. Put text with spaces in quotes.")))
+                                    "'. Put text with spaces in quotes.")
+    :validation/bad-remote    "remote set needs a git URL, for example: knope remote set git@gist.github.com:<id>.git"
+    :sync/no-remote           "No remote is set for this database. Run knope remote set <git-url> first."
+    :sync/journal-present     (str "A SQLite journal sits at " (:path details)
+                                   ". Another knope command may be writing right now, so try again in a moment."
+                                   " If no knope command is running, that file holds nothing to recover and you can delete it.")
+    :sync/remote-changed      "The remote changed since this machine last synced. Run knope pull first, or knope push --force to add this database on top."
+    :sync/local-changed       "This database has local changes that would be lost. Run knope push first, or knope pull --force to take the remote's copy."
+    :sync/first-pull-over-tasks "This database already has tasks, and they would be lost. Run knope push --force to keep them, or knope pull --force to take the remote's copy."
+    :sync/nothing-to-pull     "There is nothing to pull: the remote holds no tasks.knope yet. Run knope push to upload this database."
+    :sync/no-terminal         "Sync needs a terminal to read the passphrase. Nothing was changed. Run the command again from a terminal."
+    :sync/wrong-passphrase    "Wrong passphrase, or the remote file is corrupted. Nothing was changed. Run the command again with the right passphrase."
+    :sync/passphrase-mismatch "The passphrases don't match. Nothing was pushed. Run knope push again to retry."
+    :sync/remote-file-link    "The remote's tasks.knope is a symbolic link, and knope won't follow it. Nothing was changed. Remove it from the remote, then run knope push."
+    :sync/git-failed          (str (:err details)
+                                   "\nCheck that git can reach the remote: an SSH key, or for HTTPS, gh auth setup-git.")
+    :sync/git-missing         "Sync needs git installed and on your PATH."))
 
 (defn- error-result [error]
   {:exit 1 :out "" :err (str (error-message error) "\n")})
@@ -104,6 +124,30 @@ Commands:
             tasks (controllers.task/search match components)
             rows  (mapv #(adapters.task/task->display-row % today {:parent-ref (:parent-id %)}) tasks)]
         {:exit 0 :out (str (str/join "\n" (render/flat-lines rows opts)) "\n") :err ""}))))
+
+(defn- remote-set [components {:keys [opts]}]
+  (let [result (controllers.sync/remote-set! (:url opts) components)]
+    (if (:error/code result)
+      (error-result result)
+      {:exit 0 :out "Remote set! Every great partnership starts with a handshake.\n" :err ""})))
+
+(def ^:private sync-messages
+  {:pushed  "Your tasks are safely in the remote, encrypted and accounted for. Ann would be so proud."
+   :pulled  "Your tasks are here! Fresh from the remote, like a waffle from JJ's."
+   :in-sync "Everything is already in sync. Nothing to do but celebrate."})
+
+(defn- push [components {:keys [opts]}]
+  (let [result (controllers.sync/push! (boolean (:force opts)) components)]
+    (if (:error/code result)
+      (error-result result)
+      {:exit 0 :out (str (sync-messages (:outcome result)) "\n") :err ""})))
+
+(defn- pull [components {:keys [opts]}]
+  (let [{:keys [outcome local-changed?] :as result} (controllers.sync/pull! (boolean (:force opts)) components)]
+    (cond
+      (:error/code result) (error-result result)
+      local-changed?       {:exit 0 :out "Nothing new on the remote, so we're in sync with your last pull. But you've been busy! Share your changes with knope push.\n" :err ""}
+      :else                {:exit 0 :out (str (sync-messages (if (= :nothing-new outcome) :in-sync outcome)) "\n") :err ""})))
 
 (defn- fallback [{:keys [opts]}]
   (if (:help opts)
@@ -240,7 +284,17 @@ Commands:
                              {:cmds       ["day"]
                               :fn         (partial day components opts)
                               :args->opts [:date]
-                              :coerce     {:date :string}}])
+                              :coerce     {:date :string}}
+                             {:cmds       ["remote" "set"]
+                              :fn         (partial remote-set components)
+                              :args->opts [:url]
+                              :coerce     {:url :string}}
+                             {:cmds   ["push"]
+                              :fn     (partial push components)
+                              :coerce {:force :boolean}}
+                             {:cmds   ["pull"]
+                              :fn     (partial pull components)
+                              :coerce {:force :boolean}}])
                           [(empty-search-first
                             (shape-checked argv {:cmds       ["search"]
                                                  :fn         (partial search components opts)

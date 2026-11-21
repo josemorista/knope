@@ -648,6 +648,9 @@ Commands:
   rm ID [--force]                                               Delete a task; --force also deletes its subtasks.
   day [DATE]                                                    Show what was done, dropped and open on a day; today by default.
   search TEXT                                                   Find tasks whose title or note has every word as a prefix.
+  remote set <git-url>                                          Sync this database through a git remote, such as a gist.
+  push [--force]                                                Upload this database, encrypted; --force replaces newer remote changes.
+  pull [--force]                                                Replace this database with the remote's; --force discards local changes.
 "
           :err  ""}
          (run "--help"))))

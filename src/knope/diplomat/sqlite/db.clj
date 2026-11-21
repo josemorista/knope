@@ -44,3 +44,10 @@ END"])
     (doseq [statement schema-statements]
       (sqlite/execute! db-path [statement]))
     (sqlite/execute! db-path ["PRAGMA user_version = 1"])))
+
+(defn snapshot!
+  "Writes a consistent copy of the database to target, which must not exist or
+  be empty."
+  [db-path target]
+  (sqlite/execute! db-path ["VACUUM INTO ?" (str target)])
+  nil)
