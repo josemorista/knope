@@ -93,3 +93,7 @@ created_at = ?, due_date = ?, finish_date = ? WHERE id = ?"]
                       ["SELECT t.* FROM tasks_fts f JOIN tasks t ON t.id = f.rowid
 WHERE tasks_fts MATCH ? ORDER BY bm25(tasks_fts)"
                        match])))
+
+(defn any-task?
+  [db-path]
+  (boolean (seq (sqlite/query db-path ["SELECT 1 FROM tasks LIMIT 1"]))))

@@ -8,9 +8,16 @@
     (str (fs/normalize (fs/absolutize path)))
     (str (fs/path (get env "HOME") ".knope" "tasks.db"))))
 
+(defn- read-passphrase
+  [prompt]
+  (when-let [console (System/console)]
+    (some-> (.readPassword console prompt (object-array 0)) String.)))
+
 (defn components
   [env]
   (let [path (db-path env)]
     (db/ensure-schema! path)
-    {:sqlite path
-     :clock  (fn [] (LocalDateTime/now))}))
+    {:sqlite          path
+     :clock           (fn [] (LocalDateTime/now))
+     :read-passphrase read-passphrase
+     :kdf-iterations  600000}))
