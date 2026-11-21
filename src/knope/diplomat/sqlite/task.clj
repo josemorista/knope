@@ -17,6 +17,12 @@ VALUES (?, ?, ?, ?, ?, ?, ?)"]
           first
           adapters.task/row->task))
 
+(defn find-with-children
+  "Task id and every subtask of it, in no particular order."
+  [id db-path]
+  (mapv adapters.task/row->task
+        (sqlite/query db-path ["SELECT * FROM tasks WHERE id = ? OR parent_id = ?" id id])))
+
 (def ^:private list-order
   "The same order as logic.task/build-tree, so LIMIT and OFFSET page through it:
   open before closed; open by due date ascending with undated last, then id;

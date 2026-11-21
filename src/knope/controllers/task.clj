@@ -60,6 +60,18 @@
     {:tree  (logic.task/build-tree tasks {:all? all?})
      :more? more?}))
 
+(defn view-task
+  "Task id with its parent when it is a subtask, or its subtasks and their
+  progress when it is not."
+  [id {:keys [sqlite]}]
+  (let [rows (sqlite.task/find-with-children id sqlite)]
+    (if-let [task (first (filter #(= id (:id %)) rows))]
+      (if-let [parent-id (:parent-id task)]
+        {:task task :parent (sqlite.task/find-by-id parent-id sqlite) :children [] :progress nil}
+        (let [{:keys [children progress]} (first (logic.task/build-tree rows {:all? true}))]
+          {:task task :parent nil :children children :progress progress}))
+      {:error/code :task/not-found :error/details {:id id}})))
+
 (defn search
   "The tasks the FTS match expression finds, most relevant first."
   [match {:keys [sqlite]}]

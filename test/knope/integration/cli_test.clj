@@ -640,6 +640,7 @@
 Commands:
   add <title> [--due DATE] [--note TEXT] [--parent ID]          Add a task, or a subtask of ID.
   list [--all] [--page N]                                       Show pending tasks, 50 per page; --all includes closed ones.
+  view ID                                                       Show one task in full: details, note, parent and subtasks.
   start ID                                                      Mark a task as in progress.
   done ID                                                       Mark a task as done.
   drop ID                                                       Mark a task as dropped.
@@ -1192,3 +1193,187 @@ Commands:
   (run "add" "Authentication service")
   (is (= {:exit 0 :out "Task 1 is DONE! This calls for waffles.\n" :err ""} (run "done" "1")))
   (is (= {:exit 0 :out "[x] 1 Authentication service\n" :err ""} (run "search" "auth serv"))))
+
+(deftest view-shows-a-parent-with-its-details-note-and-subtasks
+  (insert! {:title "Plan the harvest festival" :note "Ask Ron about the permit."
+            :due-date (LocalDate/of 2026 10 1)})
+  (insert! {:title "Book the venue" :parent-id 1 :status :doing :due-date (LocalDate/of 2026 9 30)})
+  (is (= {:exit 0
+          :out  (str "#1 Plan the harvest festival\n"
+                     "  Status    [ ] todo\n"
+                     "  Due       in 3d (2026-10-01)\n"
+                     "  Created   2026-09-28\n"
+                     "  Note      Ask Ron about the permit.\n"
+                     "  Subtasks (0/1 done)\n"
+                     "    [~] 2 Book the venue  in 2d\n")
+          :err  ""}
+         (run "view" "1"))))
+
+(deftest view-shows-a-subtask-with-its-parent-and-no-subtasks-heading
+  (insert! {:title "Plan the harvest festival"})
+  (insert! {:title "Book the venue" :parent-id 1 :status :doing})
+  (let [{:keys [exit out err]} (run "view" "2")]
+    (is (= 0 exit))
+    (is (= "" err))
+    (is (= (str "#2 Book the venue\n"
+                "  Status    [~] doing\n"
+                "  Parent    #1 Plan the harvest festival\n"
+                "  Created   2026-09-28\n")
+           out))
+    (is (not (str/includes? out "Subtasks")))))
+
+(deftest view-leaves-out-the-fields-an-open-task-does-not-have
+  (insert! {:title "Write report"})
+  (let [{:keys [exit out err]} (run "view" "1")]
+    (is (= 0 exit))
+    (is (= "" err))
+    (is (= (str "#1 Write report\n"
+                "  Status    [ ] todo\n"
+                "  Created   2026-09-28\n")
+           out))
+    (doseq [label ["Due" "Note" "Finished" "Subtasks" "Parent"]]
+      (is (not (str/includes? out label)) label))))
+
+(deftest view-leaves-out-a-note-that-is-only-whitespace
+  (doseq [note ["" "   " "\n \t\n"]]
+    (testing (pr-str note)
+      (sqlite/execute! helpers/*db-path* ["DELETE FROM tasks"])
+      (sqlite/execute! helpers/*db-path* ["DELETE FROM sqlite_sequence WHERE name = 'tasks'"])
+      (insert! {:title "Write report" :note note})
+      (is (= {:exit 0
+              :out  (str "#1 Write report\n"
+                         "  Status    [ ] todo\n"
+                         "  Created   2026-09-28\n")
+              :err  ""}
+             (run "view" "1"))))))
+
+(deftest view-shows-the-finish-date-of-a-closed-task
+  (insert! {:title "Ship it" :status :done :finish-date (LocalDate/of 2026 9 27)})
+  (is (= {:exit 0
+          :out  (str "#1 Ship it\n"
+                     "  Status    [x] done\n"
+                     "  Created   2026-09-28\n"
+                     "  Finished  2026-09-27\n")
+          :err  ""}
+         (run "view" "1"))))
+
+(deftest view-prints-a-due-date-more-than-a-week-away-once
+  (insert! {:title "Renew passport" :due-date (LocalDate/of 2026 10 20)})
+  (let [{:keys [exit out err]} (run "view" "1")]
+    (is (= 0 exit))
+    (is (= "" err))
+    (is (= (str "#1 Renew passport\n"
+                "  Status    [ ] todo\n"
+                "  Due       2026-10-20\n"
+                "  Created   2026-09-28\n")
+           out))
+    (is (= 1 (count (re-seq #"2026-10-20" out))))))
+
+(deftest view-keeps-the-line-breaks-of-a-multi-line-note-under-the-first-line
+  (insert! {:title "Write report" :note "First line of the note.\nSecond line of the note."})
+  (is (= {:exit 0
+          :out  (str "#1 Write report\n"
+                     "  Status    [ ] todo\n"
+                     "  Created   2026-09-28\n"
+                     "  Note      First line of the note.\n"
+                     "            Second line of the note.\n")
+          :err  ""}
+         (run "view" "1"))))
+
+(deftest view-prints-a-blank-line-inside-a-note-empty
+  (insert! {:title "Write report" :note "First paragraph.\n\nSecond paragraph."})
+  (is (= {:exit 0
+          :out  (str "#1 Write report\n"
+                     "  Status    [ ] todo\n"
+                     "  Created   2026-09-28\n"
+                     "  Note      First paragraph.\n"
+                     "\n"
+                     "            Second paragraph.\n")
+          :err  ""}
+         (run "view" "1"))))
+
+(deftest view-drops-a-blank-first-line-of-a-note
+  (insert! {:title "Write report" :note "\nSecond line of the note."})
+  (is (= {:exit 0
+          :out  (str "#1 Write report\n"
+                     "  Status    [ ] todo\n"
+                     "  Created   2026-09-28\n"
+                     "  Note      Second line of the note.\n")
+          :err  ""}
+         (run "view" "1"))))
+
+(deftest view-drops-a-blank-last-line-of-a-note
+  (insert! {:title "Write report" :note "Only line.\n"})
+  (is (= {:exit 0
+          :out  (str "#1 Write report\n"
+                     "  Status    [ ] todo\n"
+                     "  Created   2026-09-28\n"
+                     "  Note      Only line.\n")
+          :err  ""}
+         (run "view" "1"))))
+
+(deftest view-lists-closed-subtasks-after-open-ones
+  (insert! {:title "Parent"})
+  (insert! {:title "Old step" :parent-id 1 :status :done :finish-date (LocalDate/of 2026 9 20)})
+  (insert! {:title "Open step" :parent-id 1})
+  (is (= {:exit 0
+          :out  (str "#1 Parent\n"
+                     "  Status    [ ] todo\n"
+                     "  Created   2026-09-28\n"
+                     "  Subtasks (1/2 done)\n"
+                     "    [ ] 3 Open step\n"
+                     "    [x] 2 Old step\n")
+          :err  ""}
+         (run "view" "1"))))
+
+(deftest view-on-an-unknown-id-fails
+  (insert! {})
+  (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "view" "99"))))
+
+(deftest view-with-a-bad-id-fails
+  (insert! {})
+  (doseq [input ["abc" "0" "-1"]]
+    (testing input
+      (is (= {:exit 1 :out "" :err (str "'" input "' is not a task id.\n")}
+             (run "view" input))))))
+
+(deftest view-without-an-id-prints-usage-and-exits-one
+  (is (= {:exit 1 :out "" :err @#'cli/usage} (run "view"))))
+
+(deftest view-with-an-extra-word-is-refused
+  (insert! {:title "One"})
+  (is (= (extra-argument "4") (run "view" "1" "4"))))
+
+(deftest view-with-an-unknown-option-is-refused
+  (insert! {:title "One"})
+  (is (= (unknown-option "bogus") (run "view" "--bogus" "x" "1")))
+  (is (= (unknown-option "bogus") (run "view" "1" "--bogus"))))
+
+(deftest view-changes-no-row
+  (insert! {:title "Parent" :note "n" :due-date (LocalDate/of 2026 10 1)})
+  (insert! {:title "Step" :parent-id 1 :status :doing})
+  (insert! {:title "Done step" :parent-id 1 :status :done})
+  (let [before (rows)]
+    (doseq [id ["1" "2" "99"]]
+      (testing id
+        (run "view" id)))
+    (is (= 0 (:exit (run "view" "1"))))
+    (is (= before (rows)))))
+
+(deftest view-without-color-has-no-escape-codes
+  (insert! {:title "Parent" :due-date (LocalDate/of 2026 9 26)})
+  (insert! {:title "Step" :parent-id 1 :due-date (LocalDate/of 2026 9 29)})
+  (let [{:keys [exit out]} (run "view" "1")]
+    (is (= 0 exit))
+    (is (str/includes? out "Parent"))
+    (is (not (str/includes? out "\u001b")))))
+
+(deftest view-with-color-marks-the-whole-due-value-by-urgency-and-is-otherwise-identical
+  (insert! {:title "Parent" :due-date (LocalDate/of 2026 9 26) :note "n"})
+  (insert! {:title "Step" :parent-id 1})
+  (let [plain   (:out (run "view" "1"))
+        colored (:out (cli/run helpers/*components* {:color? true} ["view" "1"]))
+        due     (or (first (filter #(str/includes? % "Due") (str/split-lines colored))) "")]
+    (is (str/includes? plain "  Due       2d overdue (2026-09-26)\n"))
+    (is (str/includes? due "\u001b[31m2d overdue (2026-09-26)\u001b[0m") (pr-str due))
+    (is (= plain (str/replace colored ansi "")))))

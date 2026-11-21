@@ -108,6 +108,30 @@
       dimmed?    (assoc :dimmed? true)
       parent-ref (assoc :parent-ref (str "↳ #" parent-ref)))))
 
+(defn task->detail
+  [{:keys [task parent children progress]} today]
+  (let [{:keys [id title status parent-id note due-date created-at finish-date]} task
+        due (logic.date/due-label due-date today)]
+    {:id       id
+     :title    title
+     :status   (str (glyphs status) " " (name status))
+     :parent   (when parent-id
+                 (str "#" parent-id (when parent (str " " (:title parent)))))
+     :due      (when due
+                 (update due :text #(if (= % (str due-date)) % (str % " (" due-date ")"))))
+     :created  (str (.toLocalDate ^LocalDateTime created-at))
+     :finished (format-date finish-date)
+     :note     (when-not (str/blank? note)
+                 (->> (str/split note #"\n" -1)
+                      (drop-while str/blank?)
+                      reverse
+                      (drop-while str/blank?)
+                      reverse
+                      (str/join "\n")))
+     :subtasks (when (seq children)
+                 {:progress (when progress (str (:done progress) "/" (:planned progress)))
+                  :rows     (mapv #(task->display-row % today {}) children)})}))
+
 (defn parse-page
   [s]
   (let [page (when s (parse-long s))]

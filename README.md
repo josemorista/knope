@@ -31,6 +31,7 @@ Make it executable with `chmod +x ~/.local/bin/knope`, and make sure `~/.local/b
 ```
 knope add <title> [--due DATE] [--note TEXT] [--parent ID]
 knope list [--all] [--page N]
+knope view ID
 knope start ID
 knope done ID
 knope drop ID
@@ -44,7 +45,7 @@ knope push [--force]
 knope pull [--force]
 ```
 
-A task can have subtasks, one level deep. `list` shows pending tasks, 50 per page, and `--all` includes closed ones. `rm` refuses to delete a task that has subtasks unless you pass `--force`. `search` finds tasks whose title or note has every word as a prefix. `day` shows what was done, dropped and open on a day, today by default.
+A task can have subtasks, one level deep. `list` shows pending tasks, 50 per page, and `--all` includes closed ones. `view` shows one task in full, with its note, parent and subtasks. `rm` refuses to delete a task that has subtasks unless you pass `--force`. `search` finds tasks whose title or note has every word as a prefix. `day` shows what was done, dropped and open on a day, today by default.
 
 Dates are written as `YYYY-MM-DD`, `today`, `tomorrow`, `yesterday`, `+Nd` or `-Nd`.
 
