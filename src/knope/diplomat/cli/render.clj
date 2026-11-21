@@ -43,6 +43,26 @@
                       (cons heading (map #(row-line % "  " color?) rows))))
             sections))))
 
+(defn detail-lines
+  "The header, then each present labeled line, then the Subtasks block, from the
+  display map of adapters.task/task->detail. A note's later lines sit under its
+  first."
+  [{:keys [id title status parent due created finished note subtasks]} {:keys [color?]}]
+  (let [labeled     (fn [label value] (str "  " (format "%-10s" label) value))
+        note-indent (apply str (repeat 12 \space))]
+    (cond-> [(str "#" id " " title) (labeled "Status" status)]
+      parent   (conj (labeled "Parent" parent))
+      due      (conj (labeled "Due" (colorize (:text due) (:urgency due) color?)))
+      true     (conj (labeled "Created" created))
+      finished (conj (labeled "Finished" finished))
+      note     (into (map-indexed (fn [i line]
+                                    (if (zero? i)
+                                      (labeled "Note" line)
+                                      (str/trimr (str note-indent line))))
+                                  (str/split note #"\n" -1)))
+      subtasks (-> (conj (str "  Subtasks" (when-let [p (:progress subtasks)] (str " (" p " done)"))))
+                   (into (map #(row-line % "    " color?)) (:rows subtasks))))))
+
 (defn flat-lines
   "One line per display row, or a line saying nothing matched."
   [rows {:keys [color?]}]

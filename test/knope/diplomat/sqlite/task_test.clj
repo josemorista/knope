@@ -401,3 +401,28 @@
         done   (assoc task :status :done :finish-date (LocalDate/of 2026 9 28))]
     (sqlite.task/update! done (db))
     (is (= [done] (sqlite.task/search (adapters.task/search-match "auth serv") (db))))))
+
+(deftest find-with-children-returns-a-parent-with-its-subtasks
+  (let [[parent step-one step-two] (insert-all! [(gen.task/task {:id nil :title "Parent" :note "n"})
+                                                 (gen.task/task {:id nil :title "Step one" :parent-id 1})
+                                                 (gen.task/task {:id nil :title "Step two" :parent-id 1 :status :done})
+                                                 (gen.task/task {:id nil :title "Other parent"})
+                                                 (gen.task/task {:id nil :title "Other step" :parent-id 4})])]
+    (is (= [parent step-one step-two]
+           (sort-by :id (sqlite.task/find-with-children 1 (db)))))))
+
+(deftest find-with-children-returns-only-a-subtask-itself
+  (let [[_ step] (insert-all! [(gen.task/task {:id nil :title "Parent"})
+                               (gen.task/task {:id nil :title "Step" :parent-id 1})
+                               (gen.task/task {:id nil :title "Sibling step" :parent-id 1})])]
+    (is (= [step] (vec (sqlite.task/find-with-children 2 (db)))))))
+
+(deftest find-with-children-returns-a-task-without-subtasks-alone
+  (let [[_ other] (insert-all! [(gen.task/task {:id nil :title "Parent"})
+                                (gen.task/task {:id nil :title "Other"})])]
+    (is (= [other] (vec (sqlite.task/find-with-children 2 (db)))))))
+
+(deftest find-with-children-returns-nothing-for-an-unknown-id
+  (insert-all! [(gen.task/task {:id nil :title "Parent"})
+                (gen.task/task {:id nil :title "Step" :parent-id 1})])
+  (is (empty? (sqlite.task/find-with-children 99 (db)))))

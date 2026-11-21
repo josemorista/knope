@@ -262,3 +262,109 @@
     (testing (pr-str input)
       (is (= {:error/code :validation/empty-search :error/details {}}
              (adapters.task/search-match input))))))
+
+(defn- detail
+  "The display map of task with the given parent, children and progress."
+  ([task] (detail task {}))
+  ([task extra]
+   (adapters.task/task->detail (merge {:task task :parent nil :children [] :progress nil} extra)
+                               today)))
+
+(deftest task->detail-builds-the-display-map-of-a-parent
+  (let [parent (gen.task/task {:id 1 :title "Plan the harvest festival" :note "Ask Ron about the permit."
+                               :due-date (LocalDate/of 2026 10 1)})
+        step   (gen.task/task {:id 2 :title "Book the venue" :parent-id 1 :status :doing
+                               :due-date (LocalDate/of 2026 9 30)})]
+    (is (= {:id       1
+            :title    "Plan the harvest festival"
+            :status   "[ ] todo"
+            :parent   nil
+            :due      {:text "in 3d (2026-10-01)" :urgency :later}
+            :created  "2026-09-28"
+            :finished nil
+            :note     "Ask Ron about the permit."
+            :subtasks {:progress "0/1"
+                       :rows     [{:glyph "[~]" :id 2 :title "Book the venue"
+                                   :due-label "in 2d" :urgency :later}]}}
+           (detail parent {:children [step] :progress {:done 0 :planned 1}})))))
+
+(deftest task->detail-leaves-out-every-field-a-bare-task-does-not-have
+  (is (= {:id       1
+          :title    "Write report"
+          :status   "[ ] todo"
+          :parent   nil
+          :due      nil
+          :created  "2026-09-28"
+          :finished nil
+          :note     nil
+          :subtasks nil}
+         (detail (gen.task/task)))))
+
+(deftest task->detail-writes-the-glyph-and-the-status-word
+  (doseq [[status status-text] {:todo "[ ] todo" :doing "[~] doing" :done "[x] done" :dropped "[-] dropped"}]
+    (testing status
+      (is (= status-text (:status (detail (gen.task/task {:status status}))))))))
+
+(deftest task->detail-writes-the-due-label-followed-by-the-date
+  (doseq [[due text urgency] [[(LocalDate/of 2026 9 26) "2d overdue (2026-09-26)" :overdue]
+                              [today "today (2026-09-28)" :soon]
+                              [(LocalDate/of 2026 9 29) "tomorrow (2026-09-29)" :soon]
+                              [(LocalDate/of 2026 10 1) "in 3d (2026-10-01)" :later]
+                              [(LocalDate/of 2026 10 5) "in 7d (2026-10-05)" :later]]]
+    (testing text
+      (is (= {:text text :urgency urgency}
+             (:due (detail (gen.task/task {:due-date due}))))))))
+
+(deftest task->detail-writes-a-due-date-more-than-a-week-away-once
+  (is (= {:text "2026-10-06" :urgency :later}
+         (:due (detail (gen.task/task {:due-date (LocalDate/of 2026 10 6)}))))))
+
+(deftest task->detail-has-no-due-for-a-task-without-a-due-date
+  (is (nil? (:due (detail (gen.task/task {:due-date nil}))))))
+
+(deftest task->detail-has-no-note-when-it-is-empty-or-only-whitespace
+  (doseq [note [nil "" "   " "\n \t\n"]]
+    (testing (pr-str note)
+      (is (nil? (:note (detail (gen.task/task {:note note}))))))))
+
+(deftest task->detail-keeps-a-multi-line-note-as-written
+  (is (= "First line.\nSecond line."
+         (:note (detail (gen.task/task {:note "First line.\nSecond line."}))))))
+
+(deftest task->detail-writes-the-date-of-creation-without-the-time
+  (is (= "2026-09-20"
+         (:created (detail (gen.task/task {:created-at (LocalDateTime/of 2026 9 20 8 30 45)}))))))
+
+(deftest task->detail-writes-the-finish-date-of-a-closed-task
+  (doseq [status [:done :dropped]]
+    (testing status
+      (is (= "2026-09-27"
+             (:finished (detail (gen.task/task {:status status :finish-date (LocalDate/of 2026 9 27)}))))))))
+
+(deftest task->detail-has-no-finish-date-for-an-open-task
+  (is (nil? (:finished (detail (gen.task/task {:status :doing}))))))
+
+(deftest task->detail-writes-the-parent-as-its-id-and-title
+  (let [parent (gen.task/task {:id 1 :title "Plan the harvest festival"})
+        step   (gen.task/task {:id 2 :title "Book the venue" :parent-id 1})]
+    (is (= "#1 Plan the harvest festival" (:parent (detail step {:parent parent}))))
+    (is (nil? (:subtasks (detail step {:parent parent}))))))
+
+(deftest task->detail-writes-only-the-parent-id-when-the-parent-was-not-found
+  (is (= "#7" (:parent (detail (gen.task/task {:id 2 :parent-id 7}) {:parent nil})))))
+
+(deftest task->detail-writes-the-subtask-progress-as-done-over-planned
+  (let [parent (gen.task/task {:id 1})
+        done   (gen.task/task {:id 2 :parent-id 1 :status :done})
+        open   (gen.task/task {:id 3 :parent-id 1})]
+    (is (= {:progress "1/2"
+            :rows     [{:glyph "[ ]" :id 3 :title "Write report" :due-label nil :urgency nil}
+                       {:glyph "[x]" :id 2 :title "Write report" :due-label nil :urgency nil}]}
+           (:subtasks (detail parent {:children [open done] :progress {:done 1 :planned 2}}))))))
+
+(deftest task->detail-has-no-progress-when-every-subtask-is-dropped
+  (let [parent  (gen.task/task {:id 1})
+        dropped (gen.task/task {:id 2 :parent-id 1 :status :dropped})]
+    (is (= {:progress nil
+            :rows     [{:glyph "[-]" :id 2 :title "Write report" :due-label nil :urgency nil}]}
+           (:subtasks (detail parent {:children [dropped] :progress nil}))))))

@@ -14,6 +14,7 @@
 Commands:
   add <title> [--due DATE] [--note TEXT] [--parent ID]          Add a task, or a subtask of ID.
   list [--all] [--page N]                                       Show pending tasks, 50 per page; --all includes closed ones.
+  view ID                                                       Show one task in full: details, note, parent and subtasks.
   start ID                                                      Mark a task as in progress.
   done ID                                                       Mark a task as done.
   drop ID                                                       Mark a task as dropped.
@@ -207,6 +208,19 @@ Commands:
              :err  ""}))))
     (fallback parsed)))
 
+(defn- view [components opts {cli-opts :opts :as parsed}]
+  (if-let [id-arg (:id cli-opts)]
+    (let [id (adapters.task/parse-id id-arg)]
+      (if (:error/code id)
+        (error-result id)
+        (let [result (controllers.task/view-task id components)]
+          (if (:error/code result)
+            (error-result result)
+            (let [today (.toLocalDate ((:clock components)))
+                  lines (render/detail-lines (adapters.task/task->detail result today) opts)]
+              {:exit 0 :out (str (str/join "\n" lines) "\n") :err ""})))))
+    (fallback parsed)))
+
 (defn- option-word
   "The option as typed, dashes kept and any `=value` dropped, or nil when the
   word is not an option. A dash before a digit, as in `-1d`, starts a value."
@@ -257,6 +271,10 @@ Commands:
                              {:cmds   ["list"]
                               :fn     (partial list-tasks components opts)
                               :coerce {:all :boolean :page :string}}
+                             {:cmds       ["view"]
+                              :fn         (partial view components opts)
+                              :args->opts [:id]
+                              :coerce     {:id :string}}
                              {:cmds       ["start"]
                               :fn         (partial transition components :start)
                               :args->opts [:id]
