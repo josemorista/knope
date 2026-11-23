@@ -6,6 +6,7 @@
             [knope.components :as components]
             [knope.controllers.sync :as controllers.sync]
             [knope.controllers.task :as controllers.task]
+            [knope.controllers.update :as controllers.update]
             [knope.diplomat.cli.render :as render]))
 
 (def ^:private usage
@@ -26,6 +27,8 @@ Commands:
   remote set <git-url>                                          Sync this database through a git remote, such as a gist.
   push [--force]                                                Upload this database, encrypted; --force replaces newer remote changes.
   pull [--force]                                                Replace this database with the remote's; --force discards local changes.
+  update                                                        Replace this knope.jar with the latest release.
+  --version                                                     Show the installed version.
 ")
 
 (defn- error-message [{:error/keys [code details]}]
@@ -63,7 +66,12 @@ Commands:
     :sync/remote-file-link    "The remote's tasks.knope is a symbolic link, and knope won't follow it. Nothing was changed. Remove it from the remote, then run knope push."
     :sync/git-failed          (str (:err details)
                                    "\nCheck that git can reach the remote: an SSH key, or for HTTPS, gh auth setup-git.")
-    :sync/git-missing         "Sync needs git installed and on your PATH."))
+    :sync/git-missing         "Sync needs git installed and on your PATH."
+    :update/not-a-jar         "update only works on an installed knope.jar. This is a checkout, so use git pull."
+    :update/unreachable       "Could not reach GitHub. Check your network and try again."
+    :update/no-release        "Could not find the latest release on GitHub. It may be rate limited, so try again later."
+    :update/not-writable      (str "Can't write next to " (:path details) ". Check the folder's permissions.")
+    :update/download-failed   "The download failed, so the installed jar was left as it was."))
 
 (defn- error-result [error]
   {:exit 1 :out "" :err (str (error-message error) "\n")})
@@ -150,10 +158,31 @@ Commands:
       local-changed?       {:exit 0 :out "Nothing new on the remote, so we're in sync with your last pull. But you've been busy! Share your changes with knope push.\n" :err ""}
       :else                {:exit 0 :out (str (sync-messages (if (= :nothing-new outcome) :in-sync outcome)) "\n") :err ""})))
 
+(defn- update-jar [components _]
+  (let [{:keys [outcome from to version] :as result} (controllers.update/update! components)]
+    (cond
+      (:error/code result)  (error-result result)
+      (= :updated outcome)  {:exit 0
+                             :out  (str "Updated knope from " (or from "an unversioned release") " to " to
+                                        ". Progress, and I have a binder for it.\n")
+                             :err  ""}
+      :else                 {:exit 0 :out (str "Already on " version ". Nothing to do but admire it.\n") :err ""})))
+
 (defn- fallback [{:keys [opts]}]
   (if (:help opts)
     {:exit 0 :out usage :err ""}
     {:exit 1 :out "" :err usage}))
+
+(defn- version [components {:keys [opts] :as parsed}]
+  (if (:version opts)
+    {:exit 0
+     :out  (str "knope "
+                (cond
+                  (nil? ((get-in components [:jar :running]))) "dev"
+                  :else (or ((get-in components [:jar :version])) "(unversioned)"))
+                "\n")
+     :err  ""}
+    (fallback parsed)))
 
 (def ^:private transition-messages
   {:start  {:applied   "Task %s is in progress. Let's make Pawnee proud!"
@@ -312,21 +341,25 @@ Commands:
                               :coerce {:force :boolean}}
                              {:cmds   ["pull"]
                               :fn     (partial pull components)
-                              :coerce {:force :boolean}}])
+                              :coerce {:force :boolean}}
+                             {:cmds   ["update"]
+                              :fn     (partial update-jar components)
+                              :coerce {}}])
                           [(empty-search-first
                             (shape-checked argv {:cmds       ["search"]
                                                  :fn         (partial search components opts)
                                                  :args->opts [:text]
                                                  :coerce     {:text :string}}))])
-                      {:cmds [] :fn fallback})
+                      {:cmds [] :fn (partial version components)})
                 argv))
 
 (defn- missing-value
   "babashka.cli throws when a value option ends the argv; turn that into our
   error and rethrow anything else."
   [e]
-  (let [{:keys [type cause implicit-value option]} (ex-data e)]
-    (if (and (= :org.babashka/cli type) (= :coerce cause) implicit-value)
+  (let [{:keys [type cause implicit-value option msg]} (ex-data e)]
+    (if (and (= :org.babashka/cli type) (= :coerce cause)
+             (or implicit-value (some-> msg (str/includes? "(implicit)"))))
       (error-result {:error/code    :validation/missing-value
                      :error/details {:option (name option)}})
       (throw e))))
@@ -347,7 +380,7 @@ Commands:
   [& args]
   (let [env                    (into {} (System/getenv))
         opts                   {:color? (color? env (terminal/tty? :stdout))}
-        {:keys [exit out err]} (run (components/components env) opts (vec args))]
+        {:keys [exit out err]} (run (components/for-args env (vec args)) opts (vec args))]
     (print out)
     (flush)
     (binding [*out* *err*]

@@ -652,6 +652,8 @@ Commands:
   remote set <git-url>                                          Sync this database through a git remote, such as a gist.
   push [--force]                                                Upload this database, encrypted; --force replaces newer remote changes.
   pull [--force]                                                Replace this database with the remote's; --force discards local changes.
+  update                                                        Replace this knope.jar with the latest release.
+  --version                                                     Show the installed version.
 "
           :err  ""}
          (run "--help"))))
