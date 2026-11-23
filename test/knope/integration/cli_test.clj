@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [knope.diplomat.cli :as cli]
+            [knope.diplomat.cli.messages :as messages]
             [knope.diplomat.sqlite.task :as sqlite.task]
             [knope.gen.task :as gen.task]
             [knope.helpers :as helpers]
@@ -15,11 +16,46 @@
 (defn- run [& argv]
   (cli/run helpers/*components* {:color? false} (vec argv)))
 
+(def ^:private usage-text
+  (str (first (get-in messages/entries [:cli/usage :variants])) "\n"))
+
+(defn- said-result?
+  "True when the result is a success whose output is one variant of the message."
+  [key details result]
+  (and (= 0 (:exit result))
+       (= "" (:err result))
+       (helpers/said? (:out result) key details)))
+
+(defn- framed-result?
+  "True when the result is a success whose output is the topic's intro, the body
+  lines and the topic's ending."
+  [topic body result]
+  (let [lines (str/split-lines (:out result))]
+    (and (= 0 (:exit result))
+         (= "" (:err result))
+         (>= (count lines) 3)
+         (helpers/said? (str (first lines) "\n") (keyword (name topic) "intro") {})
+         (helpers/said? (str (last lines) "\n") (keyword (name topic) "ending") {})
+         (= body (str (str/join "\n" (butlast (rest lines))) "\n")))))
+
+(defn- strip-frame
+  "Checks that the result's output is the topic's intro, lines and ending, and
+  returns the result with only the lines."
+  [topic result]
+  (let [lines (str/split-lines (:out result))]
+    (is (>= (count lines) 3) (:out result))
+    (is (helpers/said? (str (first lines) "\n") (keyword (name topic) "intro") {}) (first lines))
+    (is (helpers/said? (str (last lines) "\n") (keyword (name topic) "ending") {}) (last lines))
+    (assoc result :out (str (str/join "\n" (butlast (rest lines))) "\n"))))
+
+(defn- run-framed [topic & argv]
+  (strip-frame topic (apply run argv)))
+
 (defn- rows []
   (sqlite/query helpers/*db-path* ["SELECT * FROM tasks ORDER BY id"]))
 
 (deftest add-prints-the-new-id-and-stores-a-todo
-  (is (= {:exit 0 :out "Task 1 is on the list! I've already started a binder for it.\n" :err ""} (run "add" "x")))
+  (is (said-result? :task/added {:id 1} (run "add" "x")))
   (is (= [{:id          1
            :parent_id   nil
            :title       "x"
@@ -31,11 +67,11 @@
          (rows))))
 
 (deftest add-numbers-tasks-in-order
-  (is (= "Task 1 is on the list! I've already started a binder for it.\n" (:out (run "add" "first"))))
-  (is (= "Task 2 is on the list! I've already started a binder for it.\n" (:out (run "add" "second")))))
+  (is (said-result? :task/added {:id 1} (run "add" "first")))
+  (is (said-result? :task/added {:id 2} (run "add" "second"))))
 
 (deftest add-with-due-tomorrow-stores-the-date
-  (is (= {:exit 0 :out "Task 1 is on the list! I've already started a binder for it.\n" :err ""}
+  (is (said-result? :task/added {:id 1}
          (run "add" "Write report" "--due" "tomorrow")))
   (is (= [{:id          1
            :parent_id   nil
@@ -52,7 +88,7 @@
   (is (= ["2026-10-05"] (map :due_date (rows)))))
 
 (deftest add-accepts-a-negative-offset-as-a-due-value
-  (is (= {:exit 0 :out "Task 1 is on the list! I've already started a binder for it.\n" :err ""} (run "add" "x" "--due" "-2d")))
+  (is (said-result? :task/added {:id 1} (run "add" "x" "--due" "-2d")))
   (is (= ["2026-09-26"] (map :due_date (rows)))))
 
 (deftest add-accepts-a-positive-offset-as-a-due-value
@@ -70,20 +106,30 @@
 (deftest add-without-a-title-fails
   (doseq [argv [["add" ""] ["add"] ["add" "   "]]]
     (testing (pr-str argv)
-      (is (= {:exit 1 :out "" :err "A task needs a title.\n"} (apply run argv)))
+      (is (= {:exit 1 :out "" :err "A task needs a title.
+Every great project starts with a name.
+"} (apply run argv)))
       (is (empty? (rows))))))
 
 (deftest add-with-an-unreadable-due-date-fails
   (is (= {:exit 1
           :out  ""
-          :err  "Can't read date 'fri'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.\n"}
+          :err  "Can't read date 'fri'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.
+I love calendars, but I can't read that one.
+"}
          (run "add" "x" "--due" "fri")))
   (is (empty? (rows))))
 
 (deftest a-value-option-without-a-value-fails
-  (doseq [[argv message] [[["add" "x" "--due"] "--due needs a value.\n"]
-                          [["add" "x" "--note"] "--note needs a value.\n"]
-                          [["list" "--page"] "--page needs a value.\n"]]]
+  (doseq [[argv message] [[["add" "x" "--due"] "--due needs a value.
+An option without a value is like a park without benches.
+"]
+                          [["add" "x" "--note"] "--note needs a value.
+An option without a value is like a park without benches.
+"]
+                          [["list" "--page"] "--page needs a value.
+An option without a value is like a park without benches.
+"]]]
     (testing (pr-str argv)
       (is (= {:exit 1 :out "" :err message} (apply run argv)))
       (is (empty? (rows))))))
@@ -110,14 +156,16 @@
 (deftest main-adds-a-task-and-exits-zero
   (let [{:keys [exit out]} (bb-main helpers/*db-path* "add" "x")]
     (is (= 0 exit))
-    (is (= "Task 1 is on the list! I've already started a binder for it.\n" out))
+    (is (helpers/said? out :task/added {:id 1}) out)
     (is (= ["x"] (map :title (rows))))))
 
 (deftest main-exits-one-with-the-message-on-stderr
   (let [{:keys [exit out err]} (bb-main helpers/*db-path* "add" "")]
     (is (= 1 exit))
     (is (= "" out))
-    (is (= "A task needs a title.\n" err))))
+    (is (= "A task needs a title.
+Every great project starts with a name.
+" err))))
 
 (defn- insert! [overrides]
   (sqlite.task/insert! (gen.task/task (assoc overrides :id nil)) helpers/*db-path*))
@@ -146,7 +194,7 @@
   (insert! {:title "Review PR" :status :doing :due-date (LocalDate/of 2026 9 30)})
   (run "add" "Sort mail")
   (insert! {:title "Old chore" :status :done})
-  (let [{:keys [exit out err]} (run "list")]
+  (let [{:keys [exit out err]} (run-framed :list "list")]
     (is (= 0 exit))
     (is (= "" err))
     (assert-lines out [["[ ]" "5" "Pay rent" "2d overdue"]
@@ -162,7 +210,7 @@
   (run "add" "Open one")
   (insert! {:title "Finished" :status :done})
   (insert! {:title "Abandoned" :status :dropped})
-  (let [{:keys [out]} (run "list")]
+  (let [{:keys [out]} (run-framed :list "list")]
     (is (str/includes? out "Open one"))
     (is (not (str/includes? out "Finished")))
     (is (not (str/includes? out "Abandoned")))))
@@ -173,7 +221,7 @@
   (insert! {:title "Done recent" :status :done :finish-date (LocalDate/of 2026 9 27)})
   (insert! {:title "Dropped recent" :status :dropped :finish-date (LocalDate/of 2026 9 27)})
   (run "add" "Open soon" "--due" "tomorrow")
-  (let [{:keys [exit out err]} (run "list" "--all")]
+  (let [{:keys [exit out err]} (run-framed :list "list" "--all")]
     (is (= 0 exit))
     (is (= "" err))
     (assert-lines out [["[ ]" "5" "Open soon" "tomorrow"]
@@ -183,17 +231,17 @@
                        ["[x]" "2" "Done early"]])))
 
 (deftest list-with-nothing-pending-says-so-and-exits-zero
-  (is (= {:exit 0 :out "Nothing pending. Go get some waffles, you've earned them.\n" :err ""} (run "list"))))
+  (is (said-result? :list/empty {} (run "list"))))
 
 (deftest list-with-only-closed-tasks-says-nothing-pending
   (insert! {:title "Finished" :status :done})
-  (is (= {:exit 0 :out "Nothing pending. Go get some waffles, you've earned them.\n" :err ""} (run "list"))))
+  (is (said-result? :list/empty {} (run "list"))))
 
 (deftest list-without-color-has-no-escape-codes
   (run "add" "Pay rent" "--due" "-2d")
   (run "add" "Standup" "--due" "today")
   (run "add" "Plan trip" "--due" "+10d")
-  (let [{:keys [exit out]} (run "list")]
+  (let [{:keys [exit out]} (run-framed :list "list")]
     (is (= 0 exit))
     (is (str/includes? out "Pay rent"))
     (is (not (str/includes? out "\u001b")))))
@@ -202,8 +250,8 @@
   (run "add" "Pay rent" "--due" "-2d")
   (run "add" "Send invoice" "--due" "tomorrow")
   (run "add" "Plan trip" "--due" "+10d")
-  (let [plain   (:out (run "list"))
-        colored (:out (cli/run helpers/*components* {:color? true} ["list"]))
+  (let [plain   (:out (run-framed :list "list"))
+        colored (:out (strip-frame :list (cli/run helpers/*components* {:color? true} ["list"])))
         line-of (fn [title] (or (first (filter #(str/includes? % title) (str/split-lines colored))) ""))]
     (is (str/includes? (line-of "Pay rent") "\u001b[31m"))
     (is (str/includes? (line-of "Send invoice") "\u001b[33m"))
@@ -216,7 +264,7 @@
 
 (deftest list-shows-fifty-tasks-and-points-to-the-next-page
   (add-open-tasks! 51)
-  (let [{:keys [exit out err]} (run "list")
+  (let [{:keys [exit out err]} (run-framed :list "list")
         lines                  (str/split-lines out)]
     (is (= 0 exit))
     (is (= "" err))
@@ -226,27 +274,27 @@
 
 (deftest list-page-one-shows-the-rest-without-a-pointer
   (add-open-tasks! 51)
-  (is (= {:exit 0 :out "[ ] 51 Task 51\n" :err ""} (run "list" "--page" "1"))))
+  (is (framed-result? :list "[ ] 51 Task 51\n" (run "list" "--page" "1"))))
 
 (deftest list-with-exactly-fifty-tasks-has-no-pointer
   (add-open-tasks! 50)
-  (let [lines (str/split-lines (:out (run "list")))]
+  (let [lines (str/split-lines (:out (run-framed :list "list")))]
     (is (= 50 (count lines)))
     (is (line-has? (last lines) ["[ ]" "50" "Task 50"]))))
 
 (deftest list-past-the-last-page-says-nothing-pending
   (add-open-tasks! 3)
-  (is (= {:exit 0 :out "Nothing pending. Go get some waffles, you've earned them.\n" :err ""} (run "list" "--page" "1")))
-  (is (= {:exit 0 :out "Nothing pending. Go get some waffles, you've earned them.\n" :err ""} (run "list" "--all" "--page" "4"))))
+  (is (said-result? :list/empty {} (run "list" "--page" "1")))
+  (is (said-result? :list/empty {} (run "list" "--all" "--page" "4"))))
 
 (deftest list-all-pages-closed-tasks-and-keeps-all-in-the-pointer
   (add-open-tasks! 50)
   (insert! {:title "Finished" :status :done})
   (insert! {:title "Abandoned" :status :dropped})
-  (let [lines (str/split-lines (:out (run "list" "--all")))]
+  (let [lines (str/split-lines (:out (run-framed :list "list" "--all")))]
     (is (= 51 (count lines)))
     (is (= "More on page 1: knope list --all --page 1" (last lines))))
-  (let [{:keys [exit out]} (run "list" "--all" "--page" "1")]
+  (let [{:keys [exit out]} (run-framed :list "list" "--all" "--page" "1")]
     (is (= 0 exit))
     (assert-lines out [["[-]" "52" "Abandoned"]
                        ["[x]" "51" "Finished"]])))
@@ -254,31 +302,39 @@
 (deftest list-with-a-bad-page-fails
   (doseq [input ["abc" "-1" "1.5"]]
     (testing input
-      (is (= {:exit 1 :out "" :err "--page needs a number.\n"}
+      (is (= {:exit 1 :out "" :err "--page needs a number.
+Pages are numbered. That's the whole point of pages.
+"}
              (run "list" "--page" input))))))
 
 (deftest add-with-a-parent-stores-a-subtask
   (run "add" "Parent")
-  (is (= {:exit 0 :out "Task 2 is on the list! I've already started a binder for it.\n" :err ""} (run "add" "step" "--parent" "1")))
+  (is (said-result? :task/added {:id 2} (run "add" "step" "--parent" "1")))
   (is (= [nil 1] (map :parent_id (rows)))))
 
 (deftest add-with-a-parent-that-is-a-subtask-fails
   (run "add" "Parent")
   (run "add" "step" "--parent" "1")
-  (is (= {:exit 1 :out "" :err "Task 2 is a subtask; subtasks can't have subtasks.\n"}
+  (is (= {:exit 1 :out "" :err (str "Task " 2 " is a subtask; subtasks can't have subtasks.
+Even a good bureaucracy has limits on subcommittees.
+")}
          (run "add" "deeper" "--parent" "2")))
   (is (= 2 (count (rows)))))
 
 (deftest add-with-a-missing-parent-fails
   (run "add" "Parent")
-  (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "add" "step" "--parent" "99")))
+  (is (= {:exit 1 :out "" :err (str "Task " 99 " not found.
+I looked everywhere, even in the Parks basement.
+")} (run "add" "step" "--parent" "99")))
   (is (= 1 (count (rows)))))
 
 (deftest add-with-a-bad-parent-id-fails
   (run "add" "Parent")
   (doseq [input ["abc" "0" "-1"]]
     (testing input
-      (is (= {:exit 1 :out "" :err (str "'" input "' is not a task id.\n")}
+      (is (= {:exit 1 :out "" :err (str "'" input "' is not a task id.
+Task ids are numbers. I'd know, I filed every one.
+")}
              (run "add" "step" "--parent" input)))))
   (is (= 1 (count (rows)))))
 
@@ -289,7 +345,7 @@
   (insert! {:title "Finished step" :parent-id 1 :status :done})
   (insert! {:title "Dropped step" :parent-id 1 :status :dropped})
   (run "add" "Other" "--due" "today")
-  (let [{:keys [exit out err]} (run "list")
+  (let [{:keys [exit out err]} (run-framed :list "list")
         lines                  (str/split-lines out)]
     (is (= 0 exit))
     (is (= "" err))
@@ -306,7 +362,7 @@
 (deftest list-shows-a-fresh-parent-as-zero-over-one
   (run "add" "Parent")
   (run "add" "step" "--parent" "1")
-  (let [lines (str/split-lines (:out (run "list")))]
+  (let [lines (str/split-lines (:out (run-framed :list "list")))]
     (is (= 2 (count lines)))
     (is (str/includes? (first lines) "0/1"))
     (is (re-find #"^  \[ \] 2 .*step" (second lines)))))
@@ -316,7 +372,7 @@
   (run "add" "Open step" "--parent" "1")
   (insert! {:title "Old step" :parent-id 1 :status :done :finish-date (LocalDate/of 2026 9 20)})
   (insert! {:title "Recent step" :parent-id 1 :status :done :finish-date (LocalDate/of 2026 9 27)})
-  (let [{:keys [out]} (run "list" "--all")]
+  (let [{:keys [out]} (run-framed :list "list" "--all")]
     (assert-lines out [["[ ]" "1" "Parent"]
                        ["[ ]" "2" "Open step"]
                        ["[x]" "4" "Recent step"]
@@ -327,7 +383,7 @@
   (insert! {:title "Closed parent" :status :done})
   (insert! {:title "Open step" :parent-id 1})
   (insert! {:title "Closed step" :parent-id 1 :status :done})
-  (let [{:keys [exit out]} (run "list")
+  (let [{:keys [exit out]} (run-framed :list "list")
         lines              (str/split-lines out)]
     (is (= 0 exit))
     (assert-lines out [["[x]" "1" "Closed parent"]
@@ -338,10 +394,10 @@
 (deftest list-dims-a-closed-parent-shown-as-context
   (insert! {:title "Closed parent" :status :done})
   (insert! {:title "Open step" :parent-id 1})
-  (let [colored (:out (cli/run helpers/*components* {:color? true} ["list"]))
+  (let [colored (:out (strip-frame :list (cli/run helpers/*components* {:color? true} ["list"])))
         parent  (or (first (filter #(str/includes? % "Closed parent") (str/split-lines colored))) "")]
     (is (str/includes? parent "\u001b[2m"))
-    (is (= (:out (run "list")) (str/replace colored ansi "")))))
+    (is (= (:out (run-framed :list "list")) (str/replace colored ansi "")))))
 
 (deftest list-omits-a-closed-parent-whose-subtasks-are-all-closed
   (insert! {:title "Closed parent" :status :done})
@@ -349,7 +405,7 @@
   (insert! {:title "Dropped step" :parent-id 1 :status :dropped})
   (insert! {:title "Context parent" :status :done})
   (insert! {:title "Open step" :parent-id 4})
-  (let [{:keys [out]} (run "list")]
+  (let [{:keys [out]} (run-framed :list "list")]
     (assert-lines out [["[x]" "4" "Context parent"]
                        ["[ ]" "5" "Open step"]])
     (is (re-find #"^  \[ \] 5 " (get (str/split-lines out) 1 "")))))
@@ -358,27 +414,27 @@
   (add-open-tasks! 51)
   (insert! {:title "Step A" :parent-id 50})
   (insert! {:title "Step B" :parent-id 50})
-  (let [lines (str/split-lines (:out (run "list")))]
+  (let [lines (str/split-lines (:out (run-framed :list "list")))]
     (is (= 53 (count lines)))
     (is (line-has? (get lines 49 "") ["[ ]" "50" "Task 50"]))
     (is (re-find #"^  \[ \] 52 " (get lines 50 "")))
     (is (re-find #"^  \[ \] 53 " (get lines 51 "")))
     (is (= "More on page 1: knope list --page 1" (last lines))))
-  (is (= {:exit 0 :out "[ ] 51 Task 51\n" :err ""} (run "list" "--page" "1"))))
+  (is (framed-result? :list "[ ] 51 Task 51\n" (run "list" "--page" "1"))))
 
 (deftest list-does-not-leak-the-subtasks-of-the-next-page-root
   (add-open-tasks! 51)
   (insert! {:title "Step of 51" :parent-id 51})
-  (let [lines (str/split-lines (:out (run "list")))]
+  (let [lines (str/split-lines (:out (run-framed :list "list")))]
     (is (= 51 (count lines)))
     (is (not-any? #(str/includes? % "Step of 51") lines))
     (is (= "More on page 1: knope list --page 1" (last lines))))
-  (is (= "[ ] 51 Task 51  0/1\n  [ ] 52 Step of 51\n" (:out (run "list" "--page" "1")))))
+  (is (= "[ ] 51 Task 51  0/1\n  [ ] 52 Step of 51\n" (:out (run-framed :list "list" "--page" "1")))))
 
 (deftest list-with-exactly-fifty-roots-and-subtasks-has-no-pointer
   (add-open-tasks! 50)
   (insert! {:title "Step" :parent-id 50})
-  (let [lines (str/split-lines (:out (run "list")))]
+  (let [lines (str/split-lines (:out (run-framed :list "list")))]
     (is (= 51 (count lines)))
     (is (re-find #"^  \[ \] 51 " (last lines)))))
 
@@ -397,10 +453,13 @@
 
 (deftest main-list-works-from-another-directory-and-stays-plain-when-piped
   (bb-main-env "add" "Pay rent" "--due" "-2d")
-  (let [{:keys [exit out]} (bb-main-env "list")]
+  (let [{:keys [exit out]} (bb-main-env "list")
+        lines              (str/split-lines out)]
     (is (= 0 exit))
     (is (str/includes? out "Pay rent"))
-    (is (not (str/includes? out "\u001b")))))
+    (is (not (str/includes? out "\u001b")))
+    (is (helpers/said? (str (first lines) "\n") :list/intro {}))
+    (is (helpers/said? (str (last lines) "\n") :list/ending {}))))
 
 (deftest color-is-on-for-a-terminal-without-no-color
   (is (true? (cli/color? {} true)))
@@ -435,19 +494,19 @@
 
 (deftest start-moves-a-todo-task-to-doing
   (insert! {})
-  (is (= {:exit 0 :out "Task 1 is in progress. Let's make Pawnee proud!\n" :err ""} (run "start" "1")))
+  (is (said-result? :transition/start-applied {:id 1} (run "start" "1")))
   (is (= [(task-row "doing" nil)] (rows))))
 
 (deftest start-on-a-doing-task-says-so-and-changes-nothing
   (insert! {:status :doing})
-  (is (= {:exit 0 :out "Task 1 is already in progress. I love the enthusiasm.\n" :err ""} (run "start" "1")))
+  (is (said-result? :transition/start-unchanged {:id 1} (run "start" "1")))
   (is (= [(task-row "doing" nil)] (rows))))
 
 (deftest done-closes-an-open-task-with-the-clock-date
   (doseq [status [:todo :doing]]
     (testing status
       (insert! {:status status})
-      (is (= {:exit 0 :out "Task 1 is DONE! This calls for waffles.\n" :err ""} (run "done" "1")))
+      (is (said-result? :transition/done-applied {:id 1} (run "done" "1")))
       (is (= [(task-row "done" "2026-09-28")] (rows)))
       (sqlite/execute! helpers/*db-path* ["DELETE FROM tasks"])
       (sqlite/execute! helpers/*db-path* ["DELETE FROM sqlite_sequence WHERE name = 'tasks'"]))))
@@ -455,19 +514,19 @@
 (deftest a-repeated-done-keeps-the-original-finish-date
   (insert! {})
   (run "done" "1")
-  (is (= {:exit 0 :out "Task 1 is already done. You can't finish it twice, but I admire the spirit.\n" :err ""}
+  (is (said-result? :transition/done-unchanged {:id 1}
          (run-on (LocalDateTime/of 2026 10 5 9 0 0) "done" "1")))
   (is (= [(task-row "done" "2026-09-28")] (rows))))
 
 (deftest drop-closes-an-open-task-with-the-clock-date
   (insert! {:status :doing})
-  (is (= {:exit 0 :out "Task 1 is dropped. Knowing your priorities is strong leadership.\n" :err ""} (run "drop" "1")))
+  (is (said-result? :transition/drop-applied {:id 1} (run "drop" "1")))
   (is (= [(task-row "dropped" "2026-09-28")] (rows))))
 
 (deftest a-repeated-drop-keeps-the-original-finish-date
   (insert! {})
   (run "drop" "1")
-  (is (= {:exit 0 :out "Task 1 is already dropped.\n" :err ""}
+  (is (said-result? :transition/drop-unchanged {:id 1}
          (run-on (LocalDateTime/of 2026 10 5 9 0 0) "drop" "1")))
   (is (= [(task-row "dropped" "2026-09-28")] (rows))))
 
@@ -475,21 +534,29 @@
   (doseq [status [:done :dropped]]
     (testing status
       (insert! {:status status})
-      (is (= {:exit 0 :out "Task 1 is back on the list. Everyone deserves a second chance.\n" :err ""} (run "reopen" "1")))
+      (is (said-result? :transition/reopen-applied {:id 1} (run "reopen" "1")))
       (is (= [(task-row "todo" nil)] (rows)))
       (sqlite/execute! helpers/*db-path* ["DELETE FROM tasks"])
       (sqlite/execute! helpers/*db-path* ["DELETE FROM sqlite_sequence WHERE name = 'tasks'"]))))
 
 (deftest reopen-on-an-open-task-says-so-and-changes-nothing
   (insert! {:status :doing})
-  (is (= {:exit 0 :out "Task 1 is already open and waiting for you.\n" :err ""} (run "reopen" "1")))
+  (is (said-result? :transition/reopen-unchanged {:id 1} (run "reopen" "1")))
   (is (= [(task-row "doing" nil)] (rows))))
 
 (deftest an-illegal-move-fails-and-changes-nothing
-  (doseq [[status command message] [[:done "drop" "Task 1 is done; reopen it first.\n"]
-                                    [:done "start" "Task 1 is done; reopen it first.\n"]
-                                    [:dropped "done" "Task 1 is dropped; reopen it first.\n"]
-                                    [:dropped "start" "Task 1 is dropped; reopen it first.\n"]]]
+  (doseq [[status command message] [[:done "drop" (str "Task " 1 " is done; reopen it first.
+There's a procedure for this, and procedures matter.
+")]
+                                    [:done "start" (str "Task " 1 " is done; reopen it first.
+There's a procedure for this, and procedures matter.
+")]
+                                    [:dropped "done" (str "Task " 1 " is dropped; reopen it first.
+There's a procedure for this, and procedures matter.
+")]
+                                    [:dropped "start" (str "Task " 1 " is dropped; reopen it first.
+There's a procedure for this, and procedures matter.
+")]]]
     (testing (str command " on " status)
       (insert! {:status status})
       (is (= {:exit 1 :out "" :err message} (run command "1")))
@@ -500,22 +567,26 @@
 (deftest a-transition-on-an-unknown-id-fails
   (doseq [command ["start" "done" "drop" "reopen"]]
     (testing command
-      (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run command "99"))))))
+      (is (= {:exit 1 :out "" :err (str "Task " 99 " not found.
+I looked everywhere, even in the Parks basement.
+")} (run command "99"))))))
 
 (deftest a-transition-with-a-bad-id-fails
   (insert! {})
   (doseq [command ["start" "done" "drop" "reopen"]
           input   ["abc" "0" "-1"]]
     (testing (str command " " input)
-      (is (= {:exit 1 :out "" :err (str "'" input "' is not a task id.\n")} (run command input)))))
+      (is (= {:exit 1 :out "" :err (str "'" input "' is not a task id.
+Task ids are numbers. I'd know, I filed every one.
+")} (run command input)))))
   (is (= [(task-row "todo" nil)] (rows))))
 
 (deftest done-on-a-parent-with-an-open-subtask-shows-it-as-a-dimmed-header
   (run "add" "Parent")
   (run "add" "Step" "--parent" "1")
-  (is (= {:exit 0 :out "Task 1 is DONE! This calls for waffles.\n" :err ""} (run "done" "1")))
-  (let [{:keys [exit out err]} (run "list")
-        colored               (:out (cli/run helpers/*components* {:color? true} ["list"]))
+  (is (said-result? :transition/done-applied {:id 1} (run "done" "1")))
+  (let [{:keys [exit out err]} (run-framed :list "list")
+        colored               (:out (strip-frame :list (cli/run helpers/*components* {:color? true} ["list"])))
         header                (or (first (filter #(str/includes? % "Parent") (str/split-lines colored))) "")]
     (is (= 0 exit))
     (is (= "" err))
@@ -528,13 +599,17 @@
 (deftest a-transition-without-an-id-prints-usage-and-exits-one
   (doseq [command ["start" "done" "drop" "reopen"]]
     (testing command
-      (is (= {:exit 1 :out "" :err @#'cli/usage} (run command))))))
+      (is (= {:exit 1 :out "" :err usage-text} (run command))))))
 
 (defn- extra-argument [input]
-  {:exit 1 :out "" :err (str "Unexpected argument '" input "'. Put text with spaces in quotes.\n")})
+  {:exit 1 :out "" :err (str "Unexpected argument '" input "'. Put text with spaces in quotes.
+I want to hear every word, but they need to come in quotes.
+")})
 
 (defn- unknown-option [option]
-  {:exit 1 :out "" :err (str "Unknown option '--" option "'.\n")})
+  {:exit 1 :out "" :err (str "Unknown option '" (str "--" option) "'.
+That's not in any of my binders.
+")})
 
 (deftest add-with-an-unquoted-multi-word-title-is-refused
   (is (= (extra-argument "milk") (run "add" "buy" "milk")))
@@ -546,8 +621,8 @@
   (is (empty? (rows))))
 
 (deftest add-with-quoted-multi-word-text-stores-it-whole
-  (is (= {:exit 0 :out "Task 1 is on the list! I've already started a binder for it.\n" :err ""} (run "add" "buy milk")))
-  (is (= {:exit 0 :out "Task 2 is on the list! I've already started a binder for it.\n" :err ""} (run "add" "x" "--note" "buy milk")))
+  (is (said-result? :task/added {:id 1} (run "add" "buy milk")))
+  (is (said-result? :task/added {:id 2} (run "add" "x" "--note" "buy milk")))
   (is (= [{:id          1
            :parent_id   nil
            :title       "buy milk"
@@ -586,11 +661,15 @@
   (is (empty? (rows))))
 
 (deftest add-with-an-unknown-short-option-names-it-as-typed
-  (is (= {:exit 1 :out "" :err "Unknown option '-d'.\n"} (run "add" "x" "-d" "today")))
+  (is (= {:exit 1 :out "" :err "Unknown option '-d'.
+That's not in any of my binders.
+"} (run "add" "x" "-d" "today")))
   (is (empty? (rows))))
 
 (deftest add-with-an-unknown-option-and-value-names-only-the-option
-  (is (= {:exit 1 :out "" :err "Unknown option '--bogus'.\n"} (run "add" "x" "--bogus=1")))
+  (is (= {:exit 1 :out "" :err "Unknown option '--bogus'.
+That's not in any of my binders.
+"} (run "add" "x" "--bogus=1")))
   (is (empty? (rows))))
 
 (deftest a-transition-with-an-unknown-option-is-refused-and-changes-nothing
@@ -661,8 +740,8 @@ Commands:
 (deftest list-renders-a-dimmed-context-row-dim-as-a-whole-with-no-urgency-color
   (insert! {:title "Closed parent" :status :done :due-date (LocalDate/of 2026 9 26)})
   (insert! {:title "Open step" :parent-id 1})
-  (let [plain   (:out (run "list"))
-        colored (:out (cli/run helpers/*components* {:color? true} ["list"]))
+  (let [plain   (:out (run-framed :list "list"))
+        colored (:out (strip-frame :list (cli/run helpers/*components* {:color? true} ["list"])))
         parent  (or (first (filter #(str/includes? % "Closed parent") (str/split-lines colored))) "")
         plain-parent (or (first (filter #(str/includes? % "Closed parent") (str/split-lines plain))) "")]
     (is (str/includes? plain-parent "2d overdue"))
@@ -689,53 +768,53 @@ Commands:
           :finish_date nil}
          changes))
 
-(def ^:private updated-task-1 {:exit 0 :out "Task 1 is updated. Revisions make a plan stronger.\n" :err ""})
+(def ^:private updated-task-1 (partial said-result? :task/edited {:id 1}))
 
 (deftest edit-changes-the-title-and-leaves-every-other-field
   (edit-seed!)
-  (is (= updated-task-1 (run "edit" "1" "--title" "new name")))
+  (is (updated-task-1 (run "edit" "1" "--title" "new name")))
   (is (= [(edit-row {:title "new name"})] (rows))))
 
 (deftest edit-changes-the-due-date
   (edit-seed!)
-  (is (= updated-task-1 (run "edit" "1" "--due" "tomorrow")))
+  (is (updated-task-1 (run "edit" "1" "--due" "tomorrow")))
   (is (= [(edit-row {:due_date "2026-09-29"})] (rows))))
 
 (deftest edit-sets-a-due-date-on-a-task-without-one
   (insert! {})
-  (is (= updated-task-1 (run "edit" "1" "--due" "2026-11-01")))
+  (is (updated-task-1 (run "edit" "1" "--due" "2026-11-01")))
   (is (= [(assoc (task-row "todo" nil) :due_date "2026-11-01")] (rows))))
 
 (deftest edit-changes-the-note
   (edit-seed!)
-  (is (= updated-task-1 (run "edit" "1" "--note" "buy milk")))
+  (is (updated-task-1 (run "edit" "1" "--note" "buy milk")))
   (is (= [(edit-row {:note "buy milk"})] (rows))))
 
 (deftest edit-with-an-empty-note-clears-the-note
   (edit-seed!)
-  (is (= updated-task-1 (run "edit" "1" "--note" "")))
+  (is (updated-task-1 (run "edit" "1" "--note" "")))
   (is (= [(edit-row {:note nil})] (rows))))
 
 (deftest edit-with-clear-due-removes-the-due-date
   (edit-seed!)
-  (is (= updated-task-1 (run "edit" "1" "--clear-due")))
+  (is (updated-task-1 (run "edit" "1" "--clear-due")))
   (is (= [(edit-row {:due_date nil})] (rows))))
 
 (deftest edit-applies-several-options-at-once
   (edit-seed!)
-  (is (= updated-task-1 (run "edit" "1" "--title" "new name" "--note" "" "--clear-due")))
+  (is (updated-task-1 (run "edit" "1" "--title" "new name" "--note" "" "--clear-due")))
   (is (= [(edit-row {:title "new name" :note nil :due_date nil})] (rows)))
-  (is (= updated-task-1 (run "edit" "1" "--due" "+3d" "--note" "later")))
+  (is (updated-task-1 (run "edit" "1" "--due" "+3d" "--note" "later")))
   (is (= [(edit-row {:title "new name" :note "later" :due_date "2026-10-01"})] (rows))))
 
 (deftest edit-takes-the-options-before-the-id
   (edit-seed!)
-  (is (= updated-task-1 (run "edit" "--title" "new name" "1")))
+  (is (updated-task-1 (run "edit" "--title" "new name" "1")))
   (is (= [(edit-row {:title "new name"})] (rows))))
 
 (deftest edit-accepts-a-negative-offset-as-a-due-value
   (edit-seed!)
-  (is (= updated-task-1 (run "edit" "1" "--due" "-2d")))
+  (is (updated-task-1 (run "edit" "1" "--due" "-2d")))
   (is (= [(edit-row {:due_date "2026-09-26"})] (rows))))
 
 (deftest edit-leaves-status-finish-date-parent-and-other-tasks-alone
@@ -743,7 +822,7 @@ Commands:
   (insert! {:title "Step" :parent-id 1 :status :done :note "n" :due-date (LocalDate/of 2026 10 5)})
   (insert! {:title "Other"})
   (let [[parent _ other] (rows)]
-    (is (= {:exit 0 :out "Task 2 is updated. Revisions make a plan stronger.\n" :err ""} (run "edit" "2" "--title" "Renamed step")))
+    (is (said-result? :task/edited {:id 2} (run "edit" "2" "--title" "Renamed step")))
     (is (= [parent
             {:id          2
              :parent_id   1
@@ -759,16 +838,22 @@ Commands:
 (deftest edit-with-no-options-is-refused-and-changes-nothing
   (edit-seed!)
   (let [before (rows)]
-    (is (= {:exit 1 :out "" :err "Nothing to change. Pass --title, --due, --note or --clear-due.\n"}
+    (is (= {:exit 1 :out "" :err "Nothing to change. Pass --title, --due, --note or --clear-due.
+I'm ready to revise, I just need to know what.
+"}
            (run "edit" "1")))
     (is (= before (rows)))))
 
 (deftest edit-with-a-due-date-and-clear-due-is-refused-and-changes-nothing
   (edit-seed!)
   (let [before (rows)]
-    (is (= {:exit 1 :out "" :err "--due and --clear-due can't be used together.\n"}
+    (is (= {:exit 1 :out "" :err "--due and --clear-due can't be used together.
+I can't set a date and cancel it in the same breath.
+"}
            (run "edit" "1" "--due" "tomorrow" "--clear-due")))
-    (is (= {:exit 1 :out "" :err "--due and --clear-due can't be used together.\n"}
+    (is (= {:exit 1 :out "" :err "--due and --clear-due can't be used together.
+I can't set a date and cancel it in the same breath.
+"}
            (run "edit" "1" "--clear-due" "--title" "new name" "--due" "2026-11-01")))
     (is (= before (rows)))))
 
@@ -777,7 +862,9 @@ Commands:
   (let [before (rows)]
     (doseq [title ["" "   "]]
       (testing (pr-str title)
-        (is (= {:exit 1 :out "" :err "A task needs a title.\n"}
+        (is (= {:exit 1 :out "" :err "A task needs a title.
+Every great project starts with a name.
+"}
                (run "edit" "1" "--title" title)))))
     (is (= before (rows)))))
 
@@ -786,7 +873,9 @@ Commands:
   (let [before (rows)]
     (is (= {:exit 1
             :out  ""
-            :err  "Can't read date 'fri'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.\n"}
+            :err  "Can't read date 'fri'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.
+I love calendars, but I can't read that one.
+"}
            (run "edit" "1" "--due" "fri")))
     (is (= before (rows)))))
 
@@ -816,8 +905,12 @@ Commands:
 (deftest edit-on-an-unknown-id-fails
   (edit-seed!)
   (let [before (rows)]
-    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "edit" "99" "--title" "x")))
-    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "edit" "99" "--clear-due")))
+    (is (= {:exit 1 :out "" :err (str "Task " 99 " not found.
+I looked everywhere, even in the Parks basement.
+")} (run "edit" "99" "--title" "x")))
+    (is (= {:exit 1 :out "" :err (str "Task " 99 " not found.
+I looked everywhere, even in the Parks basement.
+")} (run "edit" "99" "--clear-due")))
     (is (= before (rows)))))
 
 (deftest edit-with-a-bad-id-fails
@@ -825,12 +918,14 @@ Commands:
   (let [before (rows)]
     (doseq [input ["abc" "0" "-1"]]
       (testing input
-        (is (= {:exit 1 :out "" :err (str "'" input "' is not a task id.\n")}
+        (is (= {:exit 1 :out "" :err (str "'" input "' is not a task id.
+Task ids are numbers. I'd know, I filed every one.
+")}
                (run "edit" input "--title" "x")))))
     (is (= before (rows)))))
 
 (deftest edit-without-an-id-prints-usage-and-exits-one
-  (is (= {:exit 1 :out "" :err @#'cli/usage} (run "edit"))))
+  (is (= {:exit 1 :out "" :err usage-text} (run "edit"))))
 
 (defn- seed-family!
   "Two other tasks (the first with a subtask), then task 3 with n subtasks, then an unrelated task.
@@ -854,31 +949,35 @@ Commands:
   (insert! {:title "Typo"})
   (insert! {:title "Also keep" :due-date (LocalDate/of 2026 10 1)})
   (let [[keep _ also-keep] (rows)]
-    (is (= {:exit 0 :out "Task 2 is gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "2")))
+    (is (said-result? :task/removed {:id 2 :subtasks 0} (run "rm" "2")))
     (is (= [keep also-keep] (rows)))))
 
 (deftest rm-deletes-the-only-task
   (insert! {})
-  (is (= {:exit 0 :out "Task 1 is gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "1")))
+  (is (said-result? :task/removed {:id 1 :subtasks 0} (run "rm" "1")))
   (is (= [] (rows))))
 
 (deftest rm-deletes-one-subtask-and-leaves-its-parent-and-siblings
   (let [before (seed-family! 2)]
     (is (= 6 (count before)))
-    (is (= {:exit 0 :out "Task 4 is gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "4")))
+    (is (said-result? :task/removed {:id 4 :subtasks 0} (run "rm" "4")))
     (is (= (vec (remove #(= 4 (:id %)) before)) (rows)))))
 
 (deftest rm-of-a-parent-without-force-is-refused-and-deletes-nothing
   (let [before (seed-family! 2)]
     (is (= 6 (count before)))
-    (is (= {:exit 1 :out "" :err "Task 3 has 2 subtasks. Use --force to delete them too.\n"}
+    (is (= {:exit 1 :out "" :err (str "Task " 3 " has 2 subtasks. Use --force to delete them too.
+I can't just abandon its little ones.
+")}
            (run "rm" "3")))
     (is (= before (rows)))))
 
 (deftest rm-of-a-parent-with-one-subtask-reads-in-the-singular
   (let [before (seed-family! 1)]
     (is (= 5 (count before)))
-    (is (= {:exit 1 :out "" :err "Task 3 has 1 subtask. Use --force to delete it too.\n"}
+    (is (= {:exit 1 :out "" :err (str "Task " 3 " has 1 subtask. Use --force to delete it too.
+I can't just abandon its little ones.
+")}
            (run "rm" "3")))
     (is (= before (rows)))))
 
@@ -886,47 +985,55 @@ Commands:
   (insert! {:title "Parent" :status :done})
   (insert! {:title "Step" :parent-id 1 :status :dropped})
   (let [before (rows)]
-    (is (= {:exit 1 :out "" :err "Task 1 has 1 subtask. Use --force to delete it too.\n"}
+    (is (= {:exit 1 :out "" :err (str "Task " 1 " has 1 subtask. Use --force to delete it too.
+I can't just abandon its little ones.
+")}
            (run "rm" "1")))
     (is (= before (rows)))))
 
 (deftest rm-with-force-after-the-id-deletes-the-parent-and-its-subtasks
   (let [before (seed-family! 2)]
-    (is (= {:exit 0 :out "Task 3 and its 2 subtasks are gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "3" "--force")))
+    (is (said-result? :task/removed {:id 3 :subtasks 2} (run "rm" "3" "--force")))
     (is (= (without-family before) (rows)))
     (is (= [1 2 6] (mapv :id (rows))))))
 
 (deftest rm-with-force-before-the-id-deletes-the-parent-and-its-subtasks
   (let [before (seed-family! 2)]
-    (is (= {:exit 0 :out "Task 3 and its 2 subtasks are gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "--force" "3")))
+    (is (said-result? :task/removed {:id 3 :subtasks 2} (run "rm" "--force" "3")))
     (is (= (without-family before) (rows)))
     (is (= [1 2 6] (mapv :id (rows))))))
 
 (deftest forced-rm-of-a-parent-with-one-subtask-reads-in-the-singular-with-force-after-the-id
   (let [before (seed-family! 1)]
     (is (= 5 (count before)))
-    (is (= {:exit 0 :out "Task 3 and its subtask are gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "3" "--force")))
+    (is (said-result? :task/removed {:id 3 :subtasks 1} (run "rm" "3" "--force")))
     (is (= (without-family before) (rows)))
     (is (= [1 2 5] (mapv :id (rows))))))
 
 (deftest forced-rm-of-a-parent-with-one-subtask-reads-in-the-singular-with-force-before-the-id
   (let [before (seed-family! 1)]
     (is (= 5 (count before)))
-    (is (= {:exit 0 :out "Task 3 and its subtask are gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "--force" "3")))
+    (is (said-result? :task/removed {:id 3 :subtasks 1} (run "rm" "--force" "3")))
     (is (= (without-family before) (rows)))
     (is (= [1 2 5] (mapv :id (rows))))))
 
 (deftest forced-rm-of-a-task-without-subtasks-deletes-just-that-task
   (let [before (seed-family! 0)]
     (is (= 4 (count before)))
-    (is (= {:exit 0 :out "Task 3 is gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "3" "--force")))
+    (is (said-result? :task/removed {:id 3 :subtasks 0} (run "rm" "3" "--force")))
     (is (= (without-family before) (rows)))))
 
 (deftest rm-on-an-unknown-id-fails-and-deletes-nothing
   (let [before (seed-family! 2)]
-    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "rm" "99")))
-    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "rm" "99" "--force")))
-    (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "rm" "--force" "99")))
+    (is (= {:exit 1 :out "" :err (str "Task " 99 " not found.
+I looked everywhere, even in the Parks basement.
+")} (run "rm" "99")))
+    (is (= {:exit 1 :out "" :err (str "Task " 99 " not found.
+I looked everywhere, even in the Parks basement.
+")} (run "rm" "99" "--force")))
+    (is (= {:exit 1 :out "" :err (str "Task " 99 " not found.
+I looked everywhere, even in the Parks basement.
+")} (run "rm" "--force" "99")))
     (is (= before (rows)))))
 
 (deftest every-command-that-takes-an-id-says-not-found-for-a-missing-task
@@ -935,7 +1042,9 @@ Commands:
     (doseq [argv [["start" "99"] ["done" "99"] ["drop" "99"] ["reopen" "99"]
                   ["edit" "99" "--title" "x"] ["rm" "99"]]]
       (testing (pr-str argv)
-        (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (apply run argv)))))
+        (is (= {:exit 1 :out "" :err (str "Task " 99 " not found.
+I looked everywhere, even in the Parks basement.
+")} (apply run argv)))))
     (is (= before (rows)))))
 
 (defn- seed-day!
@@ -955,8 +1064,7 @@ Commands:
 
 (deftest day-prints-the-date-then-the-done-dropped-and-open-sections
   (seed-day!)
-  (is (= {:exit 0
-          :out  (str "2026-09-20\n"
+  (is (framed-result? :day (str "2026-09-20\n"
                      "Done\n"
                      "  [x] 1 Ship release notes\n"
                      "  [x] 6 Fix login ↳ #1\n"
@@ -965,51 +1073,50 @@ Commands:
                      "Open\n"
                      "  [~] 3 Write design\n"
                      "  [ ] 7 Outline ↳ #3\n")
-          :err  ""}
          (run "day" "2026-09-20"))))
 
 (deftest day-omits-the-sections-that-are-empty
   (insert! {:title "Old spike" :status :dropped :finish-date (LocalDate/of 2026 9 20)
             :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
-  (is (= {:exit 0 :out "2026-09-20\nDropped\n  [-] 1 Old spike\n" :err ""}
+  (is (framed-result? :day "2026-09-20\nDropped\n  [-] 1 Old spike\n"
          (run "day" "2026-09-20"))))
 
 (deftest day-never-lists-a-task-finished-on-the-day-under-open
   (insert! {:title "Ship release notes" :status :done :finish-date (LocalDate/of 2026 9 20)
             :created-at (LocalDateTime/of 2026 9 15 9 0 0)})
-  (let [{:keys [out]} (run "day" "2026-09-20")]
+  (let [{:keys [out]} (run-framed :day "day" "2026-09-20")]
     (is (= "2026-09-20\nDone\n  [x] 1 Ship release notes\n" out))
     (is (not (str/includes? out "Open")))))
 
 (deftest day-lists-a-task-created-in-the-last-second-of-the-day-as-open
   (insert! {:title "Late task" :created-at (LocalDateTime/of 2026 9 20 23 59 59)})
   (insert! {:title "Next day task" :created-at (LocalDateTime/of 2026 9 21 0 0 0)})
-  (is (= {:exit 0 :out "2026-09-20\nOpen\n  [ ] 1 Late task\n" :err ""}
+  (is (framed-result? :day "2026-09-20\nOpen\n  [ ] 1 Late task\n"
          (run "day" "2026-09-20")))
   (testing "the next day has both, since neither is finished"
-    (is (= {:exit 0 :out "2026-09-21\nOpen\n  [ ] 1 Late task\n  [ ] 2 Next day task\n" :err ""}
+    (is (framed-result? :day "2026-09-21\nOpen\n  [ ] 1 Late task\n  [ ] 2 Next day task\n"
            (run "day" "2026-09-21")))))
 
 (deftest day-with-nothing-recorded-says-so-and-exits-zero
-  (is (= {:exit 0 :out "Nothing recorded for 2026-09-20. Even public servants need a day off.\n" :err ""}
+  (is (said-result? :day/empty {:date "2026-09-20"}
          (run "day" "2026-09-20"))))
 
 (deftest day-says-nothing-was-recorded-when-every-task-falls-outside-the-day
   (insert! {:title "Created later" :created-at (LocalDateTime/of 2026 9 22 9 0 0)})
   (insert! {:title "Finished earlier" :status :done :finish-date (LocalDate/of 2026 9 18)
             :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
-  (is (= {:exit 0 :out "Nothing recorded for 2026-09-20. Even public servants need a day off.\n" :err ""}
+  (is (said-result? :day/empty {:date "2026-09-20"}
          (run "day" "2026-09-20"))))
 
 (deftest day-reads-a-task-reopened-after-its-finish-day-as-open-on-that-day
   (insert! {:title "Ship release notes" :created-at (LocalDateTime/of 2026 9 15 9 0 0)})
-  (is (= {:exit 0 :out "Task 1 is DONE! This calls for waffles.\n" :err ""}
+  (is (said-result? :transition/done-applied {:id 1}
          (run-on (LocalDateTime/of 2026 9 20 9 0 0) "done" "1")))
-  (is (= {:exit 0 :out "2026-09-20\nDone\n  [x] 1 Ship release notes\n" :err ""}
+  (is (framed-result? :day "2026-09-20\nDone\n  [x] 1 Ship release notes\n"
          (run "day" "2026-09-20")))
-  (is (= {:exit 0 :out "Task 1 is back on the list. Everyone deserves a second chance.\n" :err ""}
+  (is (said-result? :transition/reopen-applied {:id 1}
          (run-on (LocalDateTime/of 2026 9 22 9 0 0) "reopen" "1")))
-  (is (= {:exit 0 :out "2026-09-20\nOpen\n  [ ] 1 Ship release notes\n" :err ""}
+  (is (framed-result? :day "2026-09-20\nOpen\n  [ ] 1 Ship release notes\n"
          (run "day" "2026-09-20"))))
 
 (deftest day-lists-a-task-finished-after-the-day-as-open-with-the-open-glyph
@@ -1017,13 +1124,13 @@ Commands:
             :due-date (LocalDate/of 2026 9 19) :created-at (LocalDateTime/of 2026 9 15 9 0 0)})
   (insert! {:title "Old spike" :status :dropped :finish-date (LocalDate/of 2026 9 23)
             :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
-  (is (= {:exit 0 :out "2026-09-20\nOpen\n  [ ] 1 Ship release notes\n  [ ] 2 Old spike\n" :err ""}
+  (is (framed-result? :day "2026-09-20\nOpen\n  [ ] 1 Ship release notes\n  [ ] 2 Old spike\n"
          (run "day" "2026-09-20"))))
 
 (deftest day-prints-no-due-label-for-a-task-with-a-due-date
   (insert! {:title "Write design" :status :doing :due-date (LocalDate/of 2026 9 19)
             :created-at (LocalDateTime/of 2026 9 12 9 0 0)})
-  (is (= {:exit 0 :out "2026-09-20\nOpen\n  [~] 1 Write design\n" :err ""}
+  (is (framed-result? :day "2026-09-20\nOpen\n  [~] 1 Write design\n"
          (run "day" "2026-09-20"))))
 
 (deftest day-without-a-date-shows-today
@@ -1031,7 +1138,7 @@ Commands:
             :created-at (LocalDateTime/of 2026 9 28 8 0 0)})
   (insert! {:title "Done yesterday" :status :done :finish-date (LocalDate/of 2026 9 27)
             :created-at (LocalDateTime/of 2026 9 27 8 0 0)})
-  (is (= {:exit 0 :out "2026-09-28\nDone\n  [x] 1 Done today\n" :err ""}
+  (is (framed-result? :day "2026-09-28\nDone\n  [x] 1 Done today\n"
          (run "day"))))
 
 (deftest day-reads-a-negative-offset-as-a-date
@@ -1039,61 +1146,63 @@ Commands:
             :created-at (LocalDateTime/of 2026 9 28 8 0 0)})
   (insert! {:title "Done yesterday" :status :done :finish-date (LocalDate/of 2026 9 27)
             :created-at (LocalDateTime/of 2026 9 27 8 0 0)})
-  (is (= {:exit 0 :out "2026-09-27\nDone\n  [x] 2 Done yesterday\n" :err ""}
+  (is (framed-result? :day "2026-09-27\nDone\n  [x] 2 Done yesterday\n"
          (run "day" "-1d"))))
 
 (deftest day-with-an-unreadable-date-fails
   (is (= {:exit 1
           :out  ""
-          :err  "Can't read date 'fri'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.\n"}
+          :err  "Can't read date 'fri'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.
+I love calendars, but I can't read that one.
+"}
          (run "day" "fri"))))
 
 (def ^:private empty-search
-  {:exit 1 :out "" :err "Search needs at least one word.\n"})
+  {:exit 1 :out "" :err "Search needs at least one word.
+Give me something to look for, and I won't rest until I find it.
+"})
 
 (deftest search-finds-a-task-by-the-prefix-of-every-quoted-word
   (insert! {:title "Authentication service"})
   (insert! {:title "Authentication only"})
   (insert! {:title "Billing service"})
-  (is (= {:exit 0 :out "[ ] 1 Authentication service\n" :err ""}
+  (is (framed-result? :search "[ ] 1 Authentication service\n"
          (run "search" "auth serv"))))
 
 (deftest search-finds-a-task-by-a-single-word-prefix
   (insert! {:title "Authentication service"})
   (insert! {:title "Billing service"})
-  (is (= {:exit 0 :out "[ ] 1 Authentication service\n" :err ""}
+  (is (framed-result? :search "[ ] 1 Authentication service\n"
          (run "search" "auth"))))
 
 (deftest search-does-not-match-inside-a-word
   (insert! {:title "Authentication service"})
-  (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""}
+  (is (said-result? :search/empty {}
          (run "search" "thentication"))))
 
 (deftest search-finds-a-note-written-with-accents-from-the-unaccented-word
   (insert! {:title "Login flow" :note "Autentica\u00e7\u00e3o do servi\u00e7o"})
   (insert! {:title "Billing"})
-  (is (= {:exit 0 :out "[ ] 1 Login flow\n" :err ""}
+  (is (framed-result? :search "[ ] 1 Login flow\n"
          (run "search" "autenticacao"))))
 
 (deftest search-finds-an-accented-title-from-the-unaccented-word
   (insert! {:title "Vi\u1ec7t Nam trip"})
   (insert! {:title "Billing"})
-  (is (= {:exit 0 :out "[ ] 1 Vi\u1ec7t Nam trip\n" :err ""}
+  (is (framed-result? :search "[ ] 1 Vi\u1ec7t Nam trip\n"
          (run "search" "viet"))))
 
 (deftest search-ignores-case
   (insert! {:title "Authentication service"})
-  (is (= {:exit 0 :out "[ ] 1 Authentication service\n" :err ""}
+  (is (framed-result? :search "[ ] 1 Authentication service\n"
          (run "search" "AUTH SERV"))))
 
 (deftest search-prints-one-line-per-match-most-relevant-first
   (insert! {:title "Quarterly planning meeting notes and agenda for everyone"})
   (insert! {:title "Quarterly"})
   (insert! {:title "Billing"})
-  (is (= {:exit 0
-          :out  (str "[ ] 2 Quarterly\n"
-                     "[ ] 1 Quarterly planning meeting notes and agenda for everyone\n")
-          :err  ""}
+  (is (framed-result? :search (str "[ ] 2 Quarterly\n"
+                                   "[ ] 1 Quarterly planning meeting notes and agenda for everyone\n")
          (run "search" "quarterly"))))
 
 (deftest search-covers-every-status
@@ -1101,7 +1210,7 @@ Commands:
   (insert! {:title "Auth doing" :status :doing})
   (insert! {:title "Auth done" :status :done})
   (insert! {:title "Auth dropped" :status :dropped})
-  (let [{:keys [exit out err]} (run "search" "auth")]
+  (let [{:keys [exit out err]} (run-framed :search "search" "auth")]
     (is (= 0 exit))
     (is (= "" err))
     (is (= #{"[ ] 1 Auth todo" "[~] 2 Auth doing" "[x] 3 Auth done" "[-] 4 Auth dropped"}
@@ -1111,39 +1220,39 @@ Commands:
 (deftest search-marks-a-subtask-with-its-parent
   (insert! {:title "Release plan"})
   (insert! {:title "Authentication fix" :parent-id 1})
-  (is (= {:exit 0 :out "[ ] 2 Authentication fix \u21b3 #1\n" :err ""}
+  (is (framed-result? :search "[ ] 2 Authentication fix \u21b3 #1\n"
          (run "search" "auth"))))
 
 (deftest search-finds-a-subtask-whose-parent-does-not-match
   (insert! {:title "Release plan"})
   (insert! {:title "Authentication fix" :parent-id 1})
   (insert! {:title "Authentication docs"})
-  (let [lines (str/split-lines (:out (run "search" "auth")))]
+  (let [lines (str/split-lines (:out (run-framed :search "search" "auth")))]
     (is (= #{"[ ] 2 Authentication fix \u21b3 #1" "[ ] 3 Authentication docs"} (set lines)))
     (is (= 2 (count lines)))))
 
 (deftest search-with-no-match-says-so-and-exits-zero
   (insert! {:title "Authentication service"})
-  (is (= "[ ] 1 Authentication service\n" (:out (run "search" "auth"))))
-  (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""} (run "search" "billing")))
-  (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""} (run "search" "auth billing"))))
+  (is (= "[ ] 1 Authentication service\n" (:out (run-framed :search "search" "auth"))))
+  (is (said-result? :search/empty {} (run "search" "billing")))
+  (is (said-result? :search/empty {} (run "search" "auth billing"))))
 
 (deftest search-on-an-empty-database-says-no-matches
-  (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""} (run "search" "auth"))))
+  (is (said-result? :search/empty {} (run "search" "auth"))))
 
 (deftest search-runs-a-word-that-mixes-punctuation-and-letters
   (insert! {:title "auth.svc rollout"})
   (insert! {:title "Billing"})
-  (is (= {:exit 0 :out "[ ] 1 auth.svc rollout\n" :err ""} (run "search" "auth.svc")))
-  (is (= {:exit 0 :out "[ ] 1 auth.svc rollout\n" :err ""} (run "search" "auth.svc rollout"))))
+  (is (framed-result? :search "[ ] 1 auth.svc rollout\n" (run "search" "auth.svc")))
+  (is (framed-result? :search "[ ] 1 auth.svc rollout\n" (run "search" "auth.svc rollout"))))
 
 (deftest search-runs-a-word-with-a-double-quote
   (insert! {:title "Say \"hi\" to the team"})
-  (is (= {:exit 0 :out "[ ] 1 Say \"hi\" to the team\n" :err ""} (run "search" "\"hi\""))))
+  (is (framed-result? :search "[ ] 1 Say \"hi\" to the team\n" (run "search" "\"hi\""))))
 
 (deftest search-ignores-punctuation-only-words-beside-real-ones
   (insert! {:title "Authentication service"})
-  (is (= {:exit 0 :out "[ ] 1 Authentication service\n" :err ""}
+  (is (framed-result? :search "[ ] 1 Authentication service\n"
          (run "search" "auth . serv"))))
 
 (deftest search-with-no-letter-or-digit-is-refused-as-an-empty-search
@@ -1163,58 +1272,56 @@ Commands:
   (is (= (unknown-option "bogus") (run "search" "auth" "--bogus" "x"))))
 
 (deftest search-follows-an-edit-of-the-title-and-the-note
-  (is (= {:exit 0 :out "Task 1 is on the list! I've already started a binder for it.\n" :err ""} (run "add" "Authentication service" "--note" "legacy")))
-  (is (= "[ ] 1 Authentication service\n" (:out (run "search" "auth"))))
-  (is (= "[ ] 1 Authentication service\n" (:out (run "search" "legacy"))))
-  (is (= {:exit 0 :out "Task 1 is updated. Revisions make a plan stronger.\n" :err ""}
+  (is (said-result? :task/added {:id 1} (run "add" "Authentication service" "--note" "legacy")))
+  (is (= "[ ] 1 Authentication service\n" (:out (run-framed :search "search" "auth"))))
+  (is (= "[ ] 1 Authentication service\n" (:out (run-framed :search "search" "legacy"))))
+  (is (said-result? :task/edited {:id 1}
          (run "edit" "1" "--title" "Billing report" "--note" "invoices")))
   (testing "the old words stop matching"
-    (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""} (run "search" "auth")))
-    (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""} (run "search" "legacy"))))
+    (is (said-result? :search/empty {} (run "search" "auth")))
+    (is (said-result? :search/empty {} (run "search" "legacy"))))
   (testing "the new words match"
-    (is (= {:exit 0 :out "[ ] 1 Billing report\n" :err ""} (run "search" "billing")))
-    (is (= {:exit 0 :out "[ ] 1 Billing report\n" :err ""} (run "search" "invoices")))))
+    (is (framed-result? :search "[ ] 1 Billing report\n" (run "search" "billing")))
+    (is (framed-result? :search "[ ] 1 Billing report\n" (run "search" "invoices")))))
 
 (deftest search-finds-nothing-after-the-task-is-removed
   (run "add" "Authentication service")
   (run "add" "Authentication docs")
   (is (= "[ ] 1 Authentication service\n[ ] 2 Authentication docs\n"
-         (:out (run "search" "auth"))))
-  (is (= {:exit 0 :out "Task 1 is gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "1")))
-  (is (= {:exit 0 :out "[ ] 2 Authentication docs\n" :err ""} (run "search" "auth")))
-  (is (= {:exit 0 :out "Task 2 is gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "2")))
-  (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""} (run "search" "auth"))))
+         (:out (run-framed :search "search" "auth"))))
+  (is (said-result? :task/removed {:id 1 :subtasks 0} (run "rm" "1")))
+  (is (framed-result? :search "[ ] 2 Authentication docs\n" (run "search" "auth")))
+  (is (said-result? :task/removed {:id 2 :subtasks 0} (run "rm" "2")))
+  (is (said-result? :search/empty {} (run "search" "auth"))))
 
 (deftest search-finds-nothing-after-a-forced-remove-of-a-parent-and-its-subtasks
   (run "add" "Authentication service")
   (run "add" "Authentication step" "--parent" "1")
-  (is (= {:exit 0 :out "Task 1 and its subtask are gone. A good public servant knows when to let go.\n" :err ""} (run "rm" "1" "--force")))
-  (is (= {:exit 0 :out "No matches. I checked every binder twice.\n" :err ""} (run "search" "auth"))))
+  (is (said-result? :task/removed {:id 1 :subtasks 1} (run "rm" "1" "--force")))
+  (is (said-result? :search/empty {} (run "search" "auth"))))
 
 (deftest search-still-finds-a-task-after-it-is-marked-done
   (run "add" "Authentication service")
-  (is (= {:exit 0 :out "Task 1 is DONE! This calls for waffles.\n" :err ""} (run "done" "1")))
-  (is (= {:exit 0 :out "[x] 1 Authentication service\n" :err ""} (run "search" "auth serv"))))
+  (is (said-result? :transition/done-applied {:id 1} (run "done" "1")))
+  (is (framed-result? :search "[x] 1 Authentication service\n" (run "search" "auth serv"))))
 
 (deftest view-shows-a-parent-with-its-details-note-and-subtasks
   (insert! {:title "Plan the harvest festival" :note "Ask Ron about the permit."
             :due-date (LocalDate/of 2026 10 1)})
   (insert! {:title "Book the venue" :parent-id 1 :status :doing :due-date (LocalDate/of 2026 9 30)})
-  (is (= {:exit 0
-          :out  (str "#1 Plan the harvest festival\n"
+  (is (framed-result? :view (str "#1 Plan the harvest festival\n"
                      "  Status    [ ] todo\n"
                      "  Due       in 3d (2026-10-01)\n"
                      "  Created   2026-09-28\n"
                      "  Note      Ask Ron about the permit.\n"
                      "  Subtasks (0/1 done)\n"
                      "    [~] 2 Book the venue  in 2d\n")
-          :err  ""}
          (run "view" "1"))))
 
 (deftest view-shows-a-subtask-with-its-parent-and-no-subtasks-heading
   (insert! {:title "Plan the harvest festival"})
   (insert! {:title "Book the venue" :parent-id 1 :status :doing})
-  (let [{:keys [exit out err]} (run "view" "2")]
+  (let [{:keys [exit out err]} (run-framed :view "view" "2")]
     (is (= 0 exit))
     (is (= "" err))
     (is (= (str "#2 Book the venue\n"
@@ -1226,7 +1333,7 @@ Commands:
 
 (deftest view-leaves-out-the-fields-an-open-task-does-not-have
   (insert! {:title "Write report"})
-  (let [{:keys [exit out err]} (run "view" "1")]
+  (let [{:keys [exit out err]} (run-framed :view "view" "1")]
     (is (= 0 exit))
     (is (= "" err))
     (is (= (str "#1 Write report\n"
@@ -1242,26 +1349,22 @@ Commands:
       (sqlite/execute! helpers/*db-path* ["DELETE FROM tasks"])
       (sqlite/execute! helpers/*db-path* ["DELETE FROM sqlite_sequence WHERE name = 'tasks'"])
       (insert! {:title "Write report" :note note})
-      (is (= {:exit 0
-              :out  (str "#1 Write report\n"
+      (is (framed-result? :view (str "#1 Write report\n"
                          "  Status    [ ] todo\n"
                          "  Created   2026-09-28\n")
-              :err  ""}
-             (run "view" "1"))))))
+         (run "view" "1"))))))
 
 (deftest view-shows-the-finish-date-of-a-closed-task
   (insert! {:title "Ship it" :status :done :finish-date (LocalDate/of 2026 9 27)})
-  (is (= {:exit 0
-          :out  (str "#1 Ship it\n"
+  (is (framed-result? :view (str "#1 Ship it\n"
                      "  Status    [x] done\n"
                      "  Created   2026-09-28\n"
                      "  Finished  2026-09-27\n")
-          :err  ""}
          (run "view" "1"))))
 
 (deftest view-prints-a-due-date-more-than-a-week-away-once
   (insert! {:title "Renew passport" :due-date (LocalDate/of 2026 10 20)})
-  (let [{:keys [exit out err]} (run "view" "1")]
+  (let [{:keys [exit out err]} (run-framed :view "view" "1")]
     (is (= 0 exit))
     (is (= "" err))
     (is (= (str "#1 Renew passport\n"
@@ -1273,74 +1376,68 @@ Commands:
 
 (deftest view-keeps-the-line-breaks-of-a-multi-line-note-under-the-first-line
   (insert! {:title "Write report" :note "First line of the note.\nSecond line of the note."})
-  (is (= {:exit 0
-          :out  (str "#1 Write report\n"
+  (is (framed-result? :view (str "#1 Write report\n"
                      "  Status    [ ] todo\n"
                      "  Created   2026-09-28\n"
                      "  Note      First line of the note.\n"
                      "            Second line of the note.\n")
-          :err  ""}
          (run "view" "1"))))
 
 (deftest view-prints-a-blank-line-inside-a-note-empty
   (insert! {:title "Write report" :note "First paragraph.\n\nSecond paragraph."})
-  (is (= {:exit 0
-          :out  (str "#1 Write report\n"
+  (is (framed-result? :view (str "#1 Write report\n"
                      "  Status    [ ] todo\n"
                      "  Created   2026-09-28\n"
                      "  Note      First paragraph.\n"
                      "\n"
                      "            Second paragraph.\n")
-          :err  ""}
          (run "view" "1"))))
 
 (deftest view-drops-a-blank-first-line-of-a-note
   (insert! {:title "Write report" :note "\nSecond line of the note."})
-  (is (= {:exit 0
-          :out  (str "#1 Write report\n"
+  (is (framed-result? :view (str "#1 Write report\n"
                      "  Status    [ ] todo\n"
                      "  Created   2026-09-28\n"
                      "  Note      Second line of the note.\n")
-          :err  ""}
          (run "view" "1"))))
 
 (deftest view-drops-a-blank-last-line-of-a-note
   (insert! {:title "Write report" :note "Only line.\n"})
-  (is (= {:exit 0
-          :out  (str "#1 Write report\n"
+  (is (framed-result? :view (str "#1 Write report\n"
                      "  Status    [ ] todo\n"
                      "  Created   2026-09-28\n"
                      "  Note      Only line.\n")
-          :err  ""}
          (run "view" "1"))))
 
 (deftest view-lists-closed-subtasks-after-open-ones
   (insert! {:title "Parent"})
   (insert! {:title "Old step" :parent-id 1 :status :done :finish-date (LocalDate/of 2026 9 20)})
   (insert! {:title "Open step" :parent-id 1})
-  (is (= {:exit 0
-          :out  (str "#1 Parent\n"
+  (is (framed-result? :view (str "#1 Parent\n"
                      "  Status    [ ] todo\n"
                      "  Created   2026-09-28\n"
                      "  Subtasks (1/2 done)\n"
                      "    [ ] 3 Open step\n"
                      "    [x] 2 Old step\n")
-          :err  ""}
          (run "view" "1"))))
 
 (deftest view-on-an-unknown-id-fails
   (insert! {})
-  (is (= {:exit 1 :out "" :err "Task 99 not found.\n"} (run "view" "99"))))
+  (is (= {:exit 1 :out "" :err (str "Task " 99 " not found.
+I looked everywhere, even in the Parks basement.
+")} (run "view" "99"))))
 
 (deftest view-with-a-bad-id-fails
   (insert! {})
   (doseq [input ["abc" "0" "-1"]]
     (testing input
-      (is (= {:exit 1 :out "" :err (str "'" input "' is not a task id.\n")}
+      (is (= {:exit 1 :out "" :err (str "'" input "' is not a task id.
+Task ids are numbers. I'd know, I filed every one.
+")}
              (run "view" input))))))
 
 (deftest view-without-an-id-prints-usage-and-exits-one
-  (is (= {:exit 1 :out "" :err @#'cli/usage} (run "view"))))
+  (is (= {:exit 1 :out "" :err usage-text} (run "view"))))
 
 (deftest view-with-an-extra-word-is-refused
   (insert! {:title "One"})
@@ -1365,7 +1462,7 @@ Commands:
 (deftest view-without-color-has-no-escape-codes
   (insert! {:title "Parent" :due-date (LocalDate/of 2026 9 26)})
   (insert! {:title "Step" :parent-id 1 :due-date (LocalDate/of 2026 9 29)})
-  (let [{:keys [exit out]} (run "view" "1")]
+  (let [{:keys [exit out]} (run-framed :view "view" "1")]
     (is (= 0 exit))
     (is (str/includes? out "Parent"))
     (is (not (str/includes? out "\u001b")))))
@@ -1373,9 +1470,80 @@ Commands:
 (deftest view-with-color-marks-the-whole-due-value-by-urgency-and-is-otherwise-identical
   (insert! {:title "Parent" :due-date (LocalDate/of 2026 9 26) :note "n"})
   (insert! {:title "Step" :parent-id 1})
-  (let [plain   (:out (run "view" "1"))
-        colored (:out (cli/run helpers/*components* {:color? true} ["view" "1"]))
+  (let [plain   (:out (run-framed :view "view" "1"))
+        colored (:out (strip-frame :view (cli/run helpers/*components* {:color? true} ["view" "1"])))
         due     (or (first (filter #(str/includes? % "Due") (str/split-lines colored))) "")]
     (is (str/includes? plain "  Due       2d overdue (2026-09-26)\n"))
     (is (str/includes? due "\u001b[31m2d overdue (2026-09-26)\u001b[0m") (pr-str due))
     (is (= plain (str/replace colored ansi "")))))
+
+;; Leslie voice
+
+(defn- lines-of [out] (str/split-lines out))
+
+(defn- said-line? [line key details]
+  (helpers/said? (str line "\n") key details))
+
+(deftest list-shows-a-leslie-intro-and-ending-around-the-rows
+  (run "add" "Pay rent")
+  (let [{:keys [exit out err]} (run "list")
+        lines                  (lines-of out)]
+    (is (= 0 exit))
+    (is (= "" err))
+    (is (= 3 (count lines)) out)
+    (is (said-line? (first lines) :list/intro {}) (str "intro: " (first lines)))
+    (is (str/includes? (second lines) "Pay rent"))
+    (is (said-line? (last lines) :list/ending {}) (str "ending: " (last lines)))))
+
+(deftest piped-list-carries-the-leslie-lines-without-color-codes
+  (bb-main-env "add" "Pay rent" "--due" "-2d")
+  (let [{:keys [exit out]} (bb-main-env "list")
+        lines              (lines-of out)]
+    (is (= 0 exit))
+    (is (said-line? (first lines) :list/intro {}) (str "intro: " (first lines)))
+    (is (said-line? (last lines) :list/ending {}) (str "ending: " (last lines)))
+    (is (not (str/includes? out "\u001b")))))
+
+(deftest an-error-keeps-its-instruction-and-adds-a-leslie-line
+  (is (= {:exit 1
+          :out  ""
+          :err  "Task 99 not found.\nI looked everywhere, even in the Parks basement.\n"}
+         (run "done" "99"))))
+
+(deftest a-success-message-is-one-of-its-variants
+  (let [{:keys [exit out err]} (run "add" "x")]
+    (is (= 0 exit))
+    (is (= "" err))
+    (is (helpers/said? out :task/added {:id 1}) out)))
+
+(deftest the-subprocess-add-prints-one-of-the-added-variants
+  (let [{:keys [exit out]} (bb-main helpers/*db-path* "add" "x")]
+    (is (= 0 exit))
+    (is (helpers/said? out :task/added {:id 1}) out)))
+
+(deftest an-empty-list-shows-an-empty-state-variant-alone
+  (let [{:keys [exit out err]} (run "list")]
+    (is (= 0 exit))
+    (is (= "" err))
+    (is (helpers/said? out :list/empty {}) out)
+    (is (= 1 (count (lines-of out))))))
+
+(deftest an-empty-search-shows-an-empty-state-variant-alone
+  (let [{:keys [exit out]} (run "search" "nothing")]
+    (is (= 0 exit))
+    (is (helpers/said? out :search/empty {}) out)
+    (is (= 1 (count (lines-of out))))))
+
+(deftest an-empty-day-shows-an-empty-state-variant-alone
+  (let [{:keys [exit out]} (run "day" "2026-09-20")]
+    (is (= 0 exit))
+    (is (helpers/said? out :day/empty {:date "2026-09-20"}) out)
+    (is (= 1 (count (lines-of out))))))
+
+(deftest list-without-color-keeps-the-leslie-lines
+  (run "add" "Pay rent" "--due" "-2d")
+  (let [{:keys [out]} (cli/run helpers/*components* {:color? false} ["list"])
+        lines         (lines-of out)]
+    (is (said-line? (first lines) :list/intro {}) (str "intro: " (first lines)))
+    (is (said-line? (last lines) :list/ending {}) (str "ending: " (last lines)))
+    (is (not (str/includes? out "\u001b")))))

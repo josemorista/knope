@@ -44,3 +44,17 @@
         (f))
       (finally
         (fs/delete-tree dir)))))
+
+(defn said?
+  "True when output is exactly one rendered variant of the message key with the
+  details, newline included, followed by the Leslie line when the entry has one."
+  [output key details]
+  (let [entry (get @(requiring-resolve 'knope.diplomat.cli.messages/entries) key)
+        _     (assert entry (str "no message entry for " key))
+        render (fn [text] (if (fn? text) (text details) text))]
+    (boolean
+     (some (fn [variant]
+             (= output (str (render variant)
+                            (when-let [leslie (:leslie entry)] (str "\n" leslie))
+                            "\n")))
+           (:variants entry)))))

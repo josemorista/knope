@@ -251,17 +251,17 @@
   (testing "push on the machine that pushed"
     (let [result (run-a [] "push")]
       (is (= 0 (:exit result)) (:err result))
-      (is (mentions? (:out result) "in sync"))
+      (is (helpers/said? (:out result) :sync/in-sync {}))
       (is (empty? (:asked result)))))
   (testing "pull on the machine that pulled"
     (let [result (run-b [] "pull")]
       (is (= 0 (:exit result)) (:err result))
-      (is (mentions? (:out result) "in sync"))
+      (is (helpers/said? (:out result) :sync/in-sync {}))
       (is (empty? (:asked result)))))
   (testing "pull on the machine that pushed"
     (let [result (run-a [] "pull")]
       (is (= 0 (:exit result)) (:err result))
-      (is (mentions? (:out result) "in sync"))
+      (is (helpers/said? (:out result) :sync/in-sync {}))
       (is (empty? (:asked result))))))
 
 (deftest pull-from-a-gist-with-no-knope-file-says-there-is-nothing-to-pull
