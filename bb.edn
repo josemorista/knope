@@ -23,4 +23,10 @@
              (System/exit (if (pos? (+ fail error)) 1 0))))}
 
   build
-  {:task (shell "bb uberjar target/knope.jar -m knope.diplomat.cli")}}}
+  {:requires ([babashka.fs :as fs])
+   :task (let [version (not-empty (System/getenv "KNOPE_VERSION"))]
+           (fs/delete-tree "target/build")
+           (fs/create-dirs "target/build")
+           (when version
+             (spit "target/build/knope-version" version))
+           (shell "bb --classpath" "src:target/build" "uberjar" "target/knope.jar" "-m" "knope.diplomat.cli"))}}}

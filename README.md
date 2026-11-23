@@ -43,6 +43,8 @@ knope search TEXT
 knope remote set <git-url>
 knope push [--force]
 knope pull [--force]
+knope update
+knope --version
 ```
 
 A task can have subtasks, one level deep. `list` shows pending tasks, 50 per page, and `--all` includes closed ones. `view` shows one task in full, with its note, parent and subtasks. `rm` refuses to delete a task that has subtasks unless you pass `--force`. `search` finds tasks whose title or note has every word as a prefix. `day` shows what was done, dropped and open on a day, today by default.
@@ -97,13 +99,15 @@ knope runs on Linux and macOS. On Apple Silicon, babashka runs the SQLite pod un
 
 ## Updating
 
-Download the jar again to the same path. Your tasks stay where they are.
+Run `knope update` from an installed jar. It downloads the latest release and replaces the jar in place, keeping its permissions. Your tasks stay where they are.
+
+A jar too old to have `update` is updated by hand: download the jar again to the same path.
 
 ## Development
 
 Run the tests with `bb test`. Run from a checkout with `bin/knope`. Build the jar with `bb build`, which writes `target/knope.jar`.
 
-To cut a release, push a tag named `vMAJOR.MINOR.PATCH`, for example `v0.1.0`. A GitHub Actions workflow runs the tests, builds the jar and publishes a release with `knope.jar` attached. If the tests fail, no release is published.
+To cut a release, run the `bump` workflow from the repository's default branch in GitHub Actions and pick `major`, `minor` or `patch`. It takes the highest `vMAJOR.MINOR.PATCH` tag (or `0.0.0` when there is none), bumps it, runs the tests, builds the jar with that version, checks that the jar prints it, and publishes a `vMAJOR.MINOR.PATCH` release with `knope.jar` attached. If the tests or the version check fail, no tag or release is published. Run from any other branch, the workflow fails before doing anything.
 
 ## License
 
