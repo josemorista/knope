@@ -1,8 +1,11 @@
 name: release
 
 on:
-  push:
-    tags: ['v*']
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -25,8 +28,21 @@ jobs:
 
       - name: Build
         run: bb build
+        env:
+          KNOPE_VERSION: ${{ inputs.version }}
+
+      - name: Check version
+        run: |
+          actual=$(bb target/knope.jar --version)
+          if [ "$actual" != "knope $VERSION" ]; then
+            echo "::error::Expected 'knope $VERSION' but the jar printed '$actual'."
+            exit 1
+          fi
+        env:
+          VERSION: ${{ inputs.version }}
 
       - name: Publish release
-        run: gh release create "$GITHUB_REF_NAME" target/knope.jar --generate-notes
+        run: gh release create "v$VERSION" target/knope.jar --target "$GITHUB_SHA" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}

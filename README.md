@@ -107,7 +107,7 @@ A jar too old to have `update` is updated by hand: download the jar again to the
 
 Run the tests with `bb test`. Run from a checkout with `bin/knope`. Build the jar with `bb build`, which writes `target/knope.jar`.
 
-To cut a release, push a tag named `vMAJOR.MINOR.PATCH`, for example `v0.1.0`. A GitHub Actions workflow runs the tests, builds the jar and publishes a release with `knope.jar` attached. If the tests fail, no release is published.
+To cut a release, run the `bump` workflow from the repository's default branch in GitHub Actions and pick `major`, `minor` or `patch`. It takes the highest `vMAJOR.MINOR.PATCH` tag (or `0.0.0` when there is none), bumps it, runs the tests, builds the jar with that version, checks that the jar prints it, and publishes a `vMAJOR.MINOR.PATCH` release with `knope.jar` attached. If the tests or the version check fail, no tag or release is published. Run from any other branch, the workflow fails before doing anything.
 
 ## License
 
