@@ -23,25 +23,21 @@
   "Entries are {:row root-row :children [child-row ...]}. Subtasks are indented
   two spaces."
   [entries {:keys [color?]}]
-  (if (empty? entries)
-    ["Nothing pending. Go get some waffles, you've earned them."]
-    (into []
-          (mapcat (fn [{:keys [row children]}]
-                    (cons (row-line row "" color?)
-                          (map #(row-line % "  " color?) children))))
-          entries)))
+  (into []
+        (mapcat (fn [{:keys [row children]}]
+                  (cons (row-line row "" color?)
+                        (map #(row-line % "  " color?) children))))
+        entries))
 
 (defn section-lines
   "The date, then each non-empty section of display rows under its heading,
-  rows indented two spaces; or a line saying nothing was recorded."
+  rows indented two spaces."
   [date {:keys [done dropped open]} {:keys [color?]}]
   (let [sections (remove (comp empty? second) [["Done" done] ["Dropped" dropped] ["Open" open]])]
-    (if (empty? sections)
-      [(str "Nothing recorded for " date ". Even public servants need a day off.")]
-      (into [(str date)]
-            (mapcat (fn [[heading rows]]
-                      (cons heading (map #(row-line % "  " color?) rows))))
-            sections))))
+    (into [(str date)]
+          (mapcat (fn [[heading rows]]
+                    (cons heading (map #(row-line % "  " color?) rows))))
+          sections)))
 
 (defn detail-lines
   "The header, then each present labeled line, then the Subtasks block, from the
@@ -64,8 +60,6 @@
                    (into (map #(row-line % "    " color?)) (:rows subtasks))))))
 
 (defn flat-lines
-  "One line per display row, or a line saying nothing matched."
+  "One line per display row."
   [rows {:keys [color?]}]
-  (if (empty? rows)
-    ["No matches. I checked every binder twice."]
-    (mapv #(row-line % "" color?) rows)))
+  (mapv #(row-line % "" color?) rows))

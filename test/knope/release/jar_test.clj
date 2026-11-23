@@ -1,7 +1,8 @@
 (ns knope.release.jar-test
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is]]
+            [knope.helpers :as helpers]))
 
 (defn- build-jar!
   "Runs `bb build` from the repo root, removing any earlier jar first so the
@@ -38,7 +39,7 @@
       (when (fs/exists? jar)
         (let [{:keys [exit out err]} (bb-jar jar home "add" "Plan the harvest festival")]
           (is (= 0 exit) err)
-          (is (= "Task 1 is on the list! I've already started a binder for it.\n" out))
+          (is (helpers/said? out :task/added {:id 1}) out)
           (is (fs/exists? (fs/path home ".knope" "tasks.db")))))
       (finally
         (fs/delete-tree home)))))
@@ -111,7 +112,7 @@
       (let [{:keys [exit out err]} (bin-knope home "update")]
         (is (= 1 exit))
         (is (= "" out))
-        (is (= "update only works on an installed knope.jar. This is a checkout, so use git pull.\n" err))
+        (is (helpers/said? err :update/not-a-jar {}) err)
         (is (not (fs/exists? (fs/path home ".knope" "tasks.db")))))
       (finally
         (fs/delete-tree home)))))

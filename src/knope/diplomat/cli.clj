@@ -7,74 +7,11 @@
             [knope.controllers.sync :as controllers.sync]
             [knope.controllers.task :as controllers.task]
             [knope.controllers.update :as controllers.update]
+            [knope.diplomat.cli.messages :as messages]
             [knope.diplomat.cli.render :as render]))
 
-(def ^:private usage
-  "Usage: knope <command> [options]
-
-Commands:
-  add <title> [--due DATE] [--note TEXT] [--parent ID]          Add a task, or a subtask of ID.
-  list [--all] [--page N]                                       Show pending tasks, 50 per page; --all includes closed ones.
-  view ID                                                       Show one task in full: details, note, parent and subtasks.
-  start ID                                                      Mark a task as in progress.
-  done ID                                                       Mark a task as done.
-  drop ID                                                       Mark a task as dropped.
-  reopen ID                                                     Move a done or dropped task back to todo.
-  edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]  Change a task's title, due date or note.
-  rm ID [--force]                                               Delete a task; --force also deletes its subtasks.
-  day [DATE]                                                    Show what was done, dropped and open on a day; today by default.
-  search TEXT                                                   Find tasks whose title or note has every word as a prefix.
-  remote set <git-url>                                          Sync this database through a git remote, such as a gist.
-  push [--force]                                                Upload this database, encrypted; --force replaces newer remote changes.
-  pull [--force]                                                Replace this database with the remote's; --force discards local changes.
-  update                                                        Replace this knope.jar with the latest release.
-  --version                                                     Show the installed version.
-")
-
-(defn- error-message [{:error/keys [code details]}]
-  (case code
-    :task/not-found           (str "Task " (:id details) " not found.")
-    :task/nesting-too-deep    (str "Task " (:id details) " is a subtask; subtasks can't have subtasks.")
-    :task/has-subtasks        (let [n (:count details)]
-                                (str "Task " (:id details) " has " n (if (= 1 n) " subtask" " subtasks")
-                                     ". Use --force to delete " (if (= 1 n) "it" "them") " too."))
-    :task/illegal-transition  (str "Task " (:id details) " is " (name (:status details)) "; reopen it first.")
-    :validation/bad-id        (str "'" (:input details) "' is not a task id.")
-    :validation/missing-title "A task needs a title."
-    :validation/nothing-to-edit "Nothing to change. Pass --title, --due, --note or --clear-due."
-    :validation/conflicting-flags "--due and --clear-due can't be used together."
-    :validation/bad-date      (str "Can't read date '" (:input details)
-                                   "'. Use YYYY-MM-DD, today, tomorrow, yesterday, +Nd or -Nd.")
-    :validation/empty-search  "Search needs at least one word."
-    :validation/bad-page      "--page needs a number."
-    :validation/missing-value (str "--" (:option details) " needs a value.")
-    :validation/unknown-option (str "Unknown option '" (:option details) "'.")
-    :validation/extra-argument (str "Unexpected argument '" (:input details)
-                                    "'. Put text with spaces in quotes.")
-    :validation/bad-remote    "remote set needs a git URL, for example: knope remote set git@gist.github.com:<id>.git"
-    :sync/no-remote           "No remote is set for this database. Run knope remote set <git-url> first."
-    :sync/journal-present     (str "A SQLite journal sits at " (:path details)
-                                   ". Another knope command may be writing right now, so try again in a moment."
-                                   " If no knope command is running, that file holds nothing to recover and you can delete it.")
-    :sync/remote-changed      "The remote changed since this machine last synced. Run knope pull first, or knope push --force to add this database on top."
-    :sync/local-changed       "This database has local changes that would be lost. Run knope push first, or knope pull --force to take the remote's copy."
-    :sync/first-pull-over-tasks "This database already has tasks, and they would be lost. Run knope push --force to keep them, or knope pull --force to take the remote's copy."
-    :sync/nothing-to-pull     "There is nothing to pull: the remote holds no tasks.knope yet. Run knope push to upload this database."
-    :sync/no-terminal         "Sync needs a terminal to read the passphrase. Nothing was changed. Run the command again from a terminal."
-    :sync/wrong-passphrase    "Wrong passphrase, or the remote file is corrupted. Nothing was changed. Run the command again with the right passphrase."
-    :sync/passphrase-mismatch "The passphrases don't match. Nothing was pushed. Run knope push again to retry."
-    :sync/remote-file-link    "The remote's tasks.knope is a symbolic link, and knope won't follow it. Nothing was changed. Remove it from the remote, then run knope push."
-    :sync/git-failed          (str (:err details)
-                                   "\nCheck that git can reach the remote: an SSH key, or for HTTPS, gh auth setup-git.")
-    :sync/git-missing         "Sync needs git installed and on your PATH."
-    :update/not-a-jar         "update only works on an installed knope.jar. This is a checkout, so use git pull."
-    :update/unreachable       "Could not reach GitHub. Check your network and try again."
-    :update/no-release        "Could not find the latest release on GitHub. It may be rate limited, so try again later."
-    :update/not-writable      (str "Can't write next to " (:path details) ". Check the folder's permissions.")
-    :update/download-failed   "The download failed, so the installed jar was left as it was."))
-
 (defn- error-result [error]
-  {:exit 1 :out "" :err (str (error-message error) "\n")})
+  {:exit 1 :out "" :err (str (messages/say (:error/code error) (:error/details error)) "\n")})
 
 (defn- add [components {:keys [opts]}]
   (let [today (.toLocalDate ((:clock components)))
@@ -84,10 +21,17 @@ Commands:
       (let [task (controllers.task/add! attrs components)]
         (if (:error/code task)
           (error-result task)
-          {:exit 0 :out (str "Task " (:id task) " is on the list! I've already started a binder for it.\n") :err ""})))))
+          {:exit 0 :out (str (messages/say :task/added {:id (:id task)}) "\n") :err ""})))))
 
-(defn- more-line [all? page]
-  (str "More on page " (inc page) ": knope list " (when all? "--all ") "--page " (inc page)))
+(defn- framed
+  "The intro, the lines and the ending, one per line; the empty message alone
+  when there are no lines."
+  [topic details lines]
+  (let [say #(messages/say (keyword (name topic) %) details)]
+    (str (str/join "\n" (if (empty? lines)
+                          [(say "empty")]
+                          (concat [(say "intro")] lines [(say "ending")])))
+         "\n")))
 
 (defn- list-tasks [components opts {cli-opts :opts}]
   (let [all? (boolean (:all cli-opts))
@@ -103,8 +47,8 @@ Commands:
                                                           children)})
                                        tree)
             lines                (cond-> (render/tree-lines entries opts)
-                                   more? (conj (more-line all? page)))]
-        {:exit 0 :out (str (str/join "\n" lines) "\n") :err ""}))))
+                                   more? (conj (messages/say :list/more {:all? all? :page page})))]
+        {:exit 0 :out (framed :list {} (when (seq entries) lines)) :err ""}))))
 
 (defn- day [components opts {cli-opts :opts}]
   (let [today (.toLocalDate ((:clock components)))
@@ -118,12 +62,13 @@ Commands:
             ;; A task finished after the day was still open on it.
             as-open  (fn [task]
                        (cond-> task (#{:done :dropped} (:status task)) (assoc :status :todo)))
-            lines    (render/section-lines date
-                                           (-> sections
-                                               (update-vals #(mapv row %))
-                                               (assoc :open (mapv (comp row as-open) (:open sections))))
-                                           opts)]
-        {:exit 0 :out (str (str/join "\n" lines) "\n") :err ""}))))
+            lines    (when (some seq (vals sections))
+                       (render/section-lines date
+                                             (-> sections
+                                                 (update-vals #(mapv row %))
+                                                 (assoc :open (mapv (comp row as-open) (:open sections))))
+                                             opts))]
+        {:exit 0 :out (framed :day {:date (str date)} lines) :err ""}))))
 
 (defn- search [components opts {cli-opts :opts}]
   (let [match (adapters.task/search-match (:text cli-opts))]
@@ -132,67 +77,51 @@ Commands:
       (let [today (.toLocalDate ((:clock components)))
             tasks (controllers.task/search match components)
             rows  (mapv #(adapters.task/task->display-row % today {:parent-ref (:parent-id %)}) tasks)]
-        {:exit 0 :out (str (str/join "\n" (render/flat-lines rows opts)) "\n") :err ""}))))
+        {:exit 0 :out (framed :search {} (when (seq rows) (render/flat-lines rows opts))) :err ""}))))
 
 (defn- remote-set [components {:keys [opts]}]
   (let [result (controllers.sync/remote-set! (:url opts) components)]
     (if (:error/code result)
       (error-result result)
-      {:exit 0 :out "Remote set! Every great partnership starts with a handshake.\n" :err ""})))
-
-(def ^:private sync-messages
-  {:pushed  "Your tasks are safely in the remote, encrypted and accounted for. Ann would be so proud."
-   :pulled  "Your tasks are here! Fresh from the remote, like a waffle from JJ's."
-   :in-sync "Everything is already in sync. Nothing to do but celebrate."})
+      {:exit 0 :out (str (messages/say :remote/set {}) "\n") :err ""})))
 
 (defn- push [components {:keys [opts]}]
   (let [result (controllers.sync/push! (boolean (:force opts)) components)]
     (if (:error/code result)
       (error-result result)
-      {:exit 0 :out (str (sync-messages (:outcome result)) "\n") :err ""})))
+      {:exit 0 :out (str (messages/say (keyword "sync" (name (:outcome result))) {}) "\n") :err ""})))
 
 (defn- pull [components {:keys [opts]}]
   (let [{:keys [outcome local-changed?] :as result} (controllers.sync/pull! (boolean (:force opts)) components)]
     (cond
       (:error/code result) (error-result result)
-      local-changed?       {:exit 0 :out "Nothing new on the remote, so we're in sync with your last pull. But you've been busy! Share your changes with knope push.\n" :err ""}
-      :else                {:exit 0 :out (str (sync-messages (if (= :nothing-new outcome) :in-sync outcome)) "\n") :err ""})))
+      local-changed?       {:exit 0 :out (str (messages/say :sync/pulled-local-changed {}) "\n") :err ""}
+      :else                {:exit 0 :out (str (messages/say (if (= :nothing-new outcome) :sync/in-sync (keyword "sync" (name outcome))) {}) "\n") :err ""})))
 
 (defn- update-jar [components _]
   (let [{:keys [outcome from to version] :as result} (controllers.update/update! components)]
     (cond
       (:error/code result)  (error-result result)
       (= :updated outcome)  {:exit 0
-                             :out  (str "Updated knope from " (or from "an unversioned release") " to " to
-                                        ". Progress, and I have a binder for it.\n")
+                             :out  (str (messages/say :update/updated {:from from :to to}) "\n")
                              :err  ""}
-      :else                 {:exit 0 :out (str "Already on " version ". Nothing to do but admire it.\n") :err ""})))
+      :else                 {:exit 0 :out (str (messages/say :update/current {:version version}) "\n") :err ""})))
 
 (defn- fallback [{:keys [opts]}]
   (if (:help opts)
-    {:exit 0 :out usage :err ""}
-    {:exit 1 :out "" :err usage}))
+    {:exit 0 :out (str (messages/say :cli/usage {}) "\n") :err ""}
+    {:exit 1 :out "" :err (str (messages/say :cli/usage {}) "\n")}))
 
 (defn- version [components {:keys [opts] :as parsed}]
   (if (:version opts)
     {:exit 0
-     :out  (str "knope "
-                (cond
-                  (nil? ((get-in components [:jar :running]))) "dev"
-                  :else (or ((get-in components [:jar :version])) "(unversioned)"))
+     :out  (str (messages/say :cli/version
+                              {:version (cond
+                                          (nil? ((get-in components [:jar :running]))) "dev"
+                                          :else (or ((get-in components [:jar :version])) "(unversioned)"))})
                 "\n")
      :err  ""}
     (fallback parsed)))
-
-(def ^:private transition-messages
-  {:start  {:applied   "Task %s is in progress. Let's make Pawnee proud!"
-            :unchanged "Task %s is already in progress. I love the enthusiasm."}
-   :done   {:applied   "Task %s is DONE! This calls for waffles."
-            :unchanged "Task %s is already done. You can't finish it twice, but I admire the spirit."}
-   :drop   {:applied   "Task %s is dropped. Knowing your priorities is strong leadership."
-            :unchanged "Task %s is already dropped."}
-   :reopen {:applied   "Task %s is back on the list. Everyone deserves a second chance."
-            :unchanged "Task %s is already open and waiting for you."}})
 
 (defn- transition [components command {:keys [opts] :as parsed}]
   (if-let [id-arg (:id opts)]
@@ -202,7 +131,7 @@ Commands:
         (let [{:keys [outcome task] :as result} (controllers.task/transition! id command components)]
           (if (:error/code result)
             (error-result result)
-            {:exit 0 :out (str (format (get-in transition-messages [command outcome]) (:id task)) "\n") :err ""}))))
+            {:exit 0 :out (str (messages/say (keyword "transition" (str (name command) "-" (name outcome))) {:id (:id task)}) "\n") :err ""}))))
     (fallback parsed)))
 
 (defn- edit [components {:keys [opts] :as parsed}]
@@ -217,7 +146,7 @@ Commands:
         (let [task (controllers.task/edit! id changes components)]
           (if (:error/code task)
             (error-result task)
-            {:exit 0 :out (str "Task " (:id task) " is updated. Revisions make a plan stronger.\n") :err ""}))))
+            {:exit 0 :out (str (messages/say :task/edited {:id (:id task)}) "\n") :err ""}))))
     (fallback parsed)))
 
 (defn- rm [components {:keys [opts] :as parsed}]
@@ -229,11 +158,7 @@ Commands:
           (if (:error/code result)
             (error-result result)
             {:exit 0
-             :out  (str (cond
-                          (zero? subtasks) (str "Task " id " is gone.")
-                          (= 1 subtasks)   (str "Task " id " and its subtask are gone.")
-                          :else            (str "Task " id " and its " subtasks " subtasks are gone."))
-                        " A good public servant knows when to let go.\n")
+             :out  (str (messages/say :task/removed {:id id :subtasks subtasks}) "\n")
              :err  ""}))))
     (fallback parsed)))
 
@@ -247,7 +172,7 @@ Commands:
             (error-result result)
             (let [today (.toLocalDate ((:clock components)))
                   lines (render/detail-lines (adapters.task/task->detail result today) opts)]
-              {:exit 0 :out (str (str/join "\n" lines) "\n") :err ""})))))
+              {:exit 0 :out (framed :view {} lines) :err ""})))))
     (fallback parsed)))
 
 (defn- option-word
