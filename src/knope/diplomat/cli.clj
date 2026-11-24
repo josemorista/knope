@@ -218,42 +218,42 @@
 
 (defn- dispatch [components opts argv]
   (cli/dispatch (conj (into (mapv (partial shape-checked argv)
-                            [{:cmds       ["add"]
+                            [{:cmds       ["tasks" "add"]
                               :fn         (partial add components)
                               :args->opts [:title]
                               :coerce     {:title :string :due :string :note :string :parent :string}}
-                             {:cmds   ["list"]
+                             {:cmds   ["tasks" "list"]
                               :fn     (partial list-tasks components opts)
                               :coerce {:all :boolean :page :string}}
-                             {:cmds       ["view"]
+                             {:cmds       ["tasks" "view"]
                               :fn         (partial view components opts)
                               :args->opts [:id]
                               :coerce     {:id :string}}
-                             {:cmds       ["start"]
+                             {:cmds       ["tasks" "start"]
                               :fn         (partial transition components :start)
                               :args->opts [:id]
                               :coerce     {:id :string}}
-                             {:cmds       ["done"]
+                             {:cmds       ["tasks" "done"]
                               :fn         (partial transition components :done)
                               :args->opts [:id]
                               :coerce     {:id :string}}
-                             {:cmds       ["drop"]
+                             {:cmds       ["tasks" "drop"]
                               :fn         (partial transition components :drop)
                               :args->opts [:id]
                               :coerce     {:id :string}}
-                             {:cmds       ["reopen"]
+                             {:cmds       ["tasks" "reopen"]
                               :fn         (partial transition components :reopen)
                               :args->opts [:id]
                               :coerce     {:id :string}}
-                             {:cmds       ["edit"]
+                             {:cmds       ["tasks" "edit"]
                               :fn         (partial edit components)
                               :args->opts [:id]
                               :coerce     {:id :string :title :string :due :string :note :string :clear-due :boolean}}
-                             {:cmds       ["rm"]
+                             {:cmds       ["tasks" "rm"]
                               :fn         (partial rm components)
                               :args->opts [:id]
                               :coerce     {:id :string :force :boolean}}
-                             {:cmds       ["day"]
+                             {:cmds       ["tasks" "day"]
                               :fn         (partial day components opts)
                               :args->opts [:date]
                               :coerce     {:date :string}}
@@ -271,7 +271,7 @@
                               :fn     (partial update-jar components)
                               :coerce {}}])
                           [(empty-search-first
-                            (shape-checked argv {:cmds       ["search"]
+                            (shape-checked argv {:cmds       ["tasks" "search"]
                                                  :fn         (partial search components opts)
                                                  :args->opts [:text]
                                                  :coerce     {:text :string}}))])
@@ -294,7 +294,10 @@
   (try
     (dispatch components opts argv)
     (catch clojure.lang.ExceptionInfo e
-      (missing-value e))))
+      (let [{:keys [type cause] :as data} (ex-data e)]
+        (if (and (= :org.babashka/cli type) (#{:input-exhausted :no-match} cause))
+          (fallback data)
+          (missing-value e))))))
 
 (defn color?
   "Color is on for a terminal unless NO_COLOR is set, even to an empty value."

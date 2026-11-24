@@ -41,29 +41,29 @@
    (plain "Usage: knope <command> [options]
 
 Commands:
-  add <title> [--due DATE] [--note TEXT] [--parent ID]          Add a task, or a subtask of ID.
-  list [--all] [--page N]                                       Show pending tasks, 50 per page; --all includes closed ones.
-  view ID                                                       Show one task in full: details, note, parent and subtasks.
-  start ID                                                      Mark a task as in progress.
-  done ID                                                       Mark a task as done.
-  drop ID                                                       Mark a task as dropped.
-  reopen ID                                                     Move a done or dropped task back to todo.
-  edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]  Change a task's title, due date or note.
-  rm ID [--force]                                               Delete a task; --force also deletes its subtasks.
-  day [DATE]                                                    Show what was done, dropped and open on a day; today by default.
-  search TEXT                                                   Find tasks whose title or note has every word as a prefix.
-  remote set <git-url>                                          Sync this database through a git remote, such as a gist.
-  push [--force]                                                Upload this database, encrypted; --force replaces newer remote changes.
-  pull [--force]                                                Replace this database with the remote's; --force discards local changes.
-  update                                                        Replace this knope.jar with the latest release.
-  --version                                                     Show the installed version.")
+  tasks add <title> [--due DATE] [--note TEXT] [--parent ID]          Add a task, or a subtask of ID.
+  tasks list [--all] [--page N]                                       Show pending tasks, 50 per page; --all includes closed ones.
+  tasks view ID                                                       Show one task in full: details, note, parent and subtasks.
+  tasks start ID                                                      Mark a task as in progress.
+  tasks done ID                                                       Mark a task as done.
+  tasks drop ID                                                       Mark a task as dropped.
+  tasks reopen ID                                                     Move a done or dropped task back to todo.
+  tasks edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]  Change a task's title, due date or note.
+  tasks rm ID [--force]                                               Delete a task; --force also deletes its subtasks.
+  tasks day [DATE]                                                    Show what was done, dropped and open on a day; today by default.
+  tasks search TEXT                                                   Find tasks whose title or note has every word as a prefix.
+  remote set <git-url>                                                Sync this database through a git remote, such as a gist.
+  push [--force]                                                      Upload this database, encrypted; --force replaces newer remote changes.
+  pull [--force]                                                      Replace this database with the remote's; --force discards local changes.
+  update                                                              Replace this knope.jar with the latest release.
+  --version                                                           Show the installed version.")
 
    :cli/version
    (plain (fn [{:keys [version]}] (str "knope " version)))
 
    :list/more
    (plain (fn [{:keys [all? page]}]
-            (str "More on page " (inc page) ": knope list " (when all? "--all ") "--page " (inc page))))
+            (str "More on page " (inc page) ": knope tasks list " (when all? "--all ") "--page " (inc page))))
 
    :task/added
    (ids "Task %s is on the list! I've already started a binder for it."

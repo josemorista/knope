@@ -29,17 +29,17 @@ Make it executable with `chmod +x ~/.local/bin/knope`, and make sure `~/.local/b
 ## Usage
 
 ```
-knope add <title> [--due DATE] [--note TEXT] [--parent ID]
-knope list [--all] [--page N]
-knope view ID
-knope start ID
-knope done ID
-knope drop ID
-knope reopen ID
-knope edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]
-knope rm ID [--force]
-knope day [DATE]
-knope search TEXT
+knope tasks add <title> [--due DATE] [--note TEXT] [--parent ID]
+knope tasks list [--all] [--page N]
+knope tasks view ID
+knope tasks start ID
+knope tasks done ID
+knope tasks drop ID
+knope tasks reopen ID
+knope tasks edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]
+knope tasks rm ID [--force]
+knope tasks day [DATE]
+knope tasks search TEXT
 knope remote set <git-url>
 knope push [--force]
 knope pull [--force]
@@ -47,23 +47,23 @@ knope update
 knope --version
 ```
 
-A task can have subtasks, one level deep. `list` shows pending tasks, 50 per page, and `--all` includes closed ones. `view` shows one task in full, with its note, parent and subtasks. `rm` refuses to delete a task that has subtasks unless you pass `--force`. `search` finds tasks whose title or note has every word as a prefix. `day` shows what was done, dropped and open on a day, today by default.
+A task can have subtasks, one level deep. `tasks list` shows pending tasks, 50 per page, and `--all` includes closed ones. `tasks view` shows one task in full, with its note, parent and subtasks. `tasks rm` refuses to delete a task that has subtasks unless you pass `--force`. `tasks search` finds tasks whose title or note has every word as a prefix. `tasks day` shows what was done, dropped and open on a day, today by default.
 
 Dates are written as `YYYY-MM-DD`, `today`, `tomorrow`, `yesterday`, `+Nd` or `-Nd`.
 
 An example session:
 
 ```
-$ knope add "Plan the harvest festival" --due +3d
+$ knope tasks add "Plan the harvest festival" --due +3d
 Task 1 is on the list! I've already started a binder for it.
-$ knope add "Book the venue" --parent 1
+$ knope tasks add "Book the venue" --parent 1
 Task 2 is on the list! I've already started a binder for it.
-$ knope start 2
+$ knope tasks start 2
 Task 2 is in progress. Let's make Pawnee proud!
-$ knope list
+$ knope tasks list
 [ ] 1 Plan the harvest festival  0/1  in 3d
   [~] 2 Book the venue
-$ knope done 2
+$ knope tasks done 2
 Task 2 is DONE! This calls for waffles.
 ```
 

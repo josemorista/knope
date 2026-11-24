@@ -37,7 +37,7 @@
       (is (= 0 (:exit build)) (:err build))
       (is (fs/exists? jar))
       (when (fs/exists? jar)
-        (let [{:keys [exit out err]} (bb-jar jar home "add" "Plan the harvest festival")]
+        (let [{:keys [exit out err]} (bb-jar jar home "tasks" "add" "Plan the harvest festival")]
           (is (= 0 exit) err)
           (is (helpers/said? out :task/added {:id 1}) out)
           (is (fs/exists? (fs/path home ".knope" "tasks.db")))))
