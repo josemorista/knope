@@ -64,7 +64,7 @@
   result)
 
 (defn- add-task! [run-machine title]
-  (ok! (run-machine [] "add" title)))
+  (ok! (run-machine [] "tasks" "add" title)))
 
 (defn- set-remote! [run-machine]
   (ok! (run-machine [] "remote" "set" *gist*)))
@@ -239,7 +239,7 @@
 (deftest first-pull-counts-closed-tasks-as-existing-tasks
   (machine-a-pushed! "write report")
   (add-task! run-b "mine")
-  (ok! (run-b [] "done" "1"))
+  (ok! (run-b [] "tasks" "done" "1"))
   (set-remote! run-b)
   (let [before (file-bytes *other-db*)
         result (run-b [passphrase] "pull")]

@@ -46,7 +46,7 @@
   (is (= {:exit 1 :out "" :err "Unknown option '--version'.
 That's not in any of my binders.
 "}
-         (run (with-jar {:path "/opt/knope/knope.jar"} "1.2.3") "list" "--version"))))
+         (run (with-jar {:path "/opt/knope/knope.jar"} "1.2.3") "tasks" "list" "--version"))))
 
 (defn- with-update
   "The test components with fake :release and :jar functions. The fake jar

@@ -52,8 +52,8 @@
         other (str (fs/path (fs/create-temp-dir {:prefix "knope-test-"}) "other.db"))]
     (try
       (let [built  (components/components {"HOME" (str home) "KNOPE_DB" other})
-            added  (cli/run built {:color? false} ["add" "Moved task"])
-            listed (cli/run built {:color? false} ["list"])]
+            added  (cli/run built {:color? false} ["tasks" "add" "Moved task"])
+            listed (cli/run built {:color? false} ["tasks" "list"])]
         (is (= other (:sqlite built)))
         (is (= 0 (:exit added)))
         (is (= 0 (:exit listed)))
