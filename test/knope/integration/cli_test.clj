@@ -27,26 +27,30 @@
        (helpers/said? (:out result) key details)))
 
 (defn- framed-result?
-  "True when the result is a success whose output is the topic's intro, the body
-  lines and the topic's ending."
+  "True when the result is a success whose output is the topic's intro, a blank
+  line, the body lines, a blank line and the topic's ending."
   [topic body result]
   (let [lines (str/split-lines (:out result))]
     (and (= 0 (:exit result))
          (= "" (:err result))
-         (>= (count lines) 3)
+         (>= (count lines) 5)
          (helpers/said? (str (first lines) "\n") (keyword (name topic) "intro") {})
+         (= "" (second lines))
+         (= "" (last (butlast lines)))
          (helpers/said? (str (last lines) "\n") (keyword (name topic) "ending") {})
-         (= body (str (str/join "\n" (butlast (rest lines))) "\n")))))
+         (= body (str (str/join "\n" (drop-last 2 (drop 2 lines))) "\n")))))
 
 (defn- strip-frame
-  "Checks that the result's output is the topic's intro, lines and ending, and
-  returns the result with only the lines."
+  "Checks that the result's output is the topic's intro, a blank line, lines, a
+  blank line and the ending, and returns the result with only the lines."
   [topic result]
   (let [lines (str/split-lines (:out result))]
-    (is (>= (count lines) 3) (:out result))
+    (is (>= (count lines) 5) (:out result))
     (is (helpers/said? (str (first lines) "\n") (keyword (name topic) "intro") {}) (first lines))
+    (is (= "" (second lines)) "one blank line after the intro")
+    (is (= "" (last (butlast lines))) "one blank line before the ending")
     (is (helpers/said? (str (last lines) "\n") (keyword (name topic) "ending") {}) (last lines))
-    (assoc result :out (str (str/join "\n" (butlast (rest lines))) "\n"))))
+    (assoc result :out (str (str/join "\n" (drop-last 2 (drop 2 lines))) "\n"))))
 
 (defn- run-framed [topic & argv]
   (strip-frame topic (apply run argv)))
@@ -733,6 +737,7 @@ Commands:
   pull [--force]                                                      Replace this database with the remote's; --force discards local changes.
   update                                                              Replace this knope.jar with the latest release.
   --version                                                           Show the installed version.
+  t                                                                   Short for tasks, as in knope t add.
 "
           :err  ""}
          (run "--help"))))
@@ -1085,36 +1090,37 @@ I looked everywhere, even in the Parks basement.
 (deftest day-prints-the-date-then-the-done-dropped-and-open-sections
   (seed-day!)
   (is (framed-result? :day (str "2026-09-20\n"
+                     "----------\n"
                      "Done\n"
                      "  [x] 1 Ship release notes\n"
-                     "  [x] 6 Fix login ↳ #1\n"
+                     "    [x] 6 Fix login\n"
                      "Dropped\n"
                      "  [-] 2 Old spike\n"
                      "Open\n"
                      "  [~] 3 Write design\n"
-                     "  [ ] 7 Outline ↳ #3\n")
+                     "    [ ] 7 Outline\n")
          (run "tasks" "day" "2026-09-20"))))
 
 (deftest day-omits-the-sections-that-are-empty
   (insert! {:title "Old spike" :status :dropped :finish-date (LocalDate/of 2026 9 20)
             :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
-  (is (framed-result? :day "2026-09-20\nDropped\n  [-] 1 Old spike\n"
+  (is (framed-result? :day "2026-09-20\n----------\nDropped\n  [-] 1 Old spike\n"
          (run "tasks" "day" "2026-09-20"))))
 
 (deftest day-never-lists-a-task-finished-on-the-day-under-open
   (insert! {:title "Ship release notes" :status :done :finish-date (LocalDate/of 2026 9 20)
             :created-at (LocalDateTime/of 2026 9 15 9 0 0)})
   (let [{:keys [out]} (run-framed :day "tasks" "day" "2026-09-20")]
-    (is (= "2026-09-20\nDone\n  [x] 1 Ship release notes\n" out))
+    (is (= "2026-09-20\n----------\nDone\n  [x] 1 Ship release notes\n" out))
     (is (not (str/includes? out "Open")))))
 
 (deftest day-lists-a-task-created-in-the-last-second-of-the-day-as-open
   (insert! {:title "Late task" :created-at (LocalDateTime/of 2026 9 20 23 59 59)})
   (insert! {:title "Next day task" :created-at (LocalDateTime/of 2026 9 21 0 0 0)})
-  (is (framed-result? :day "2026-09-20\nOpen\n  [ ] 1 Late task\n"
+  (is (framed-result? :day "2026-09-20\n----------\nOpen\n  [ ] 1 Late task\n"
          (run "tasks" "day" "2026-09-20")))
   (testing "the next day has both, since neither is finished"
-    (is (framed-result? :day "2026-09-21\nOpen\n  [ ] 1 Late task\n  [ ] 2 Next day task\n"
+    (is (framed-result? :day "2026-09-21\n----------\nOpen\n  [ ] 1 Late task\n  [ ] 2 Next day task\n"
            (run "tasks" "day" "2026-09-21")))))
 
 (deftest day-with-nothing-recorded-says-so-and-exits-zero
@@ -1132,11 +1138,11 @@ I looked everywhere, even in the Parks basement.
   (insert! {:title "Ship release notes" :created-at (LocalDateTime/of 2026 9 15 9 0 0)})
   (is (said-result? :transition/done-applied {:id 1}
          (run-on (LocalDateTime/of 2026 9 20 9 0 0) "tasks" "done" "1")))
-  (is (framed-result? :day "2026-09-20\nDone\n  [x] 1 Ship release notes\n"
+  (is (framed-result? :day "2026-09-20\n----------\nDone\n  [x] 1 Ship release notes\n"
          (run "tasks" "day" "2026-09-20")))
   (is (said-result? :transition/reopen-applied {:id 1}
          (run-on (LocalDateTime/of 2026 9 22 9 0 0) "tasks" "reopen" "1")))
-  (is (framed-result? :day "2026-09-20\nOpen\n  [ ] 1 Ship release notes\n"
+  (is (framed-result? :day "2026-09-20\n----------\nOpen\n  [ ] 1 Ship release notes\n"
          (run "tasks" "day" "2026-09-20"))))
 
 (deftest day-lists-a-task-finished-after-the-day-as-open-with-the-open-glyph
@@ -1144,13 +1150,13 @@ I looked everywhere, even in the Parks basement.
             :due-date (LocalDate/of 2026 9 19) :created-at (LocalDateTime/of 2026 9 15 9 0 0)})
   (insert! {:title "Old spike" :status :dropped :finish-date (LocalDate/of 2026 9 23)
             :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
-  (is (framed-result? :day "2026-09-20\nOpen\n  [ ] 1 Ship release notes\n  [ ] 2 Old spike\n"
+  (is (framed-result? :day "2026-09-20\n----------\nOpen\n  [ ] 1 Ship release notes\n  [ ] 2 Old spike\n"
          (run "tasks" "day" "2026-09-20"))))
 
 (deftest day-prints-no-due-label-for-a-task-with-a-due-date
   (insert! {:title "Write design" :status :doing :due-date (LocalDate/of 2026 9 19)
             :created-at (LocalDateTime/of 2026 9 12 9 0 0)})
-  (is (framed-result? :day "2026-09-20\nOpen\n  [~] 1 Write design\n"
+  (is (framed-result? :day "2026-09-20\n----------\nOpen\n  [~] 1 Write design\n"
          (run "tasks" "day" "2026-09-20"))))
 
 (deftest day-without-a-date-shows-today
@@ -1158,7 +1164,7 @@ I looked everywhere, even in the Parks basement.
             :created-at (LocalDateTime/of 2026 9 28 8 0 0)})
   (insert! {:title "Done yesterday" :status :done :finish-date (LocalDate/of 2026 9 27)
             :created-at (LocalDateTime/of 2026 9 27 8 0 0)})
-  (is (framed-result? :day "2026-09-28\nDone\n  [x] 1 Done today\n"
+  (is (framed-result? :day "2026-09-28\n----------\nDone\n  [x] 1 Done today\n"
          (run "tasks" "day"))))
 
 (deftest day-reads-a-negative-offset-as-a-date
@@ -1166,7 +1172,7 @@ I looked everywhere, even in the Parks basement.
             :created-at (LocalDateTime/of 2026 9 28 8 0 0)})
   (insert! {:title "Done yesterday" :status :done :finish-date (LocalDate/of 2026 9 27)
             :created-at (LocalDateTime/of 2026 9 27 8 0 0)})
-  (is (framed-result? :day "2026-09-27\nDone\n  [x] 2 Done yesterday\n"
+  (is (framed-result? :day "2026-09-27\n----------\nDone\n  [x] 2 Done yesterday\n"
          (run "tasks" "day" "-1d"))))
 
 (deftest day-with-an-unreadable-date-fails
@@ -1176,6 +1182,204 @@ I looked everywhere, even in the Parks basement.
 I love calendars, but I can't read that one.
 "}
          (run "tasks" "day" "fri"))))
+
+;; Framing: blank lines around Leslie's lines, colon intros
+
+(defn- spaced-content
+  "Asserts the output is the topic's intro, one blank line, the content, one
+  blank line and the topic's ending, and returns the content lines."
+  [topic result]
+  (let [lines (vec (str/split-lines (:out result)))
+        n     (count lines)]
+    (is (= 0 (:exit result)))
+    (is (= "" (:err result)))
+    (is (>= n 5) (:out result))
+    (is (helpers/said? (str (first lines) "\n") (keyword (name topic) "intro") {}) (first lines))
+    (is (= "" (get lines 1)) "one blank line after the intro")
+    (is (= "" (get lines (- n 2))) "one blank line before the ending")
+    (is (helpers/said? (str (last lines) "\n") (keyword (name topic) "ending") {}) (last lines))
+    (if (>= n 5) (subvec lines 2 (- n 2)) [])))
+
+(deftest framed-views-set-the-intro-and-ending-off-with-one-blank-line-each
+  (insert! {:title "Write design" :status :doing})
+  (insert! {:title "Outline" :parent-id 1})
+  (doseq [[topic argv] [[:list ["tasks" "list"]]
+                        [:search ["tasks" "search" "design"]]
+                        [:day ["tasks" "day"]]
+                        [:view ["tasks" "view" "1"]]]]
+    (testing (str topic)
+      (let [result  (apply run argv)
+            content (spaced-content topic result)
+            lines   (str/split-lines (:out result))]
+        (is (seq content))
+        (is (not-any? str/blank? (take 1 content)) "the content starts right after the blank line")
+        (is (str/ends-with? (first lines) ":") "the intro ends with a colon")))))
+
+(deftest list-keeps-the-paging-hint-with-the-content-before-the-closing-blank-line
+  (add-open-tasks! 51)
+  (let [content (spaced-content :list (run "tasks" "list"))]
+    (is (= 51 (count content)))
+    (is (= "More on page 1: knope tasks list --page 1" (last content)))))
+
+;; Day view: underlined date and nested subtasks
+
+(deftest day-underlines-the-date-with-dashes-as-wide-as-the-date-and-the-first-heading-follows
+  (seed-day!)
+  (let [content (spaced-content :day (run "tasks" "day" "2026-09-20"))]
+    (is (= ["2026-09-20" "----------" "Done"] (take 3 content)))))
+
+(deftest day-nests-a-subtask-under-its-parent-in-the-same-section-without-a-parent-reference
+  (insert! {:title "Write design" :status :doing :created-at (LocalDateTime/of 2026 9 12 9 0 0)})
+  (insert! {:title "Outline" :parent-id 1 :created-at (LocalDateTime/of 2026 9 13 9 0 0)})
+  (let [result  (run "tasks" "day" "2026-09-20")
+        content (spaced-content :day result)]
+    (is (= ["2026-09-20"
+            "----------"
+            "Open"
+            "  [~] 1 Write design"
+            "    [ ] 2 Outline"]
+           content))
+    (is (not (str/includes? (:out result) "↳")))))
+
+(deftest day-shows-a-still-open-parent-as-a-context-row-above-a-subtask-done-on-the-day
+  (insert! {:title "Write design" :status :doing :created-at (LocalDateTime/of 2026 9 12 9 0 0)})
+  (insert! {:title "Outline" :parent-id 1 :status :done :finish-date (LocalDate/of 2026 9 20)
+            :created-at (LocalDateTime/of 2026 9 13 9 0 0)})
+  (is (= ["2026-09-20"
+          "----------"
+          "Done"
+          "  [~] 1 Write design"
+          "    [x] 2 Outline"
+          "Open"
+          "  [~] 1 Write design"]
+         (spaced-content :day (run "tasks" "day" "2026-09-20")))))
+
+(deftest day-shows-a-parent-done-earlier-as-a-context-row-with-its-done-glyph-above-an-open-subtask
+  (insert! {:title "Write design" :status :done :finish-date (LocalDate/of 2026 9 18)
+            :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+  (insert! {:title "Outline" :parent-id 1 :created-at (LocalDateTime/of 2026 9 13 9 0 0)})
+  (is (= ["2026-09-20"
+          "----------"
+          "Open"
+          "  [x] 1 Write design"
+          "    [ ] 2 Outline"]
+         (spaced-content :day (run "tasks" "day" "2026-09-20")))))
+
+(deftest day-shows-a-parent-dropped-earlier-as-a-context-row-with-its-dropped-glyph-above-an-open-subtask
+  (insert! {:title "Old spike" :status :dropped :finish-date (LocalDate/of 2026 9 18)
+            :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+  (insert! {:title "Outline" :parent-id 1 :created-at (LocalDateTime/of 2026 9 13 9 0 0)})
+  (is (= ["2026-09-20"
+          "----------"
+          "Open"
+          "  [-] 1 Old spike"
+          "    [ ] 2 Outline"]
+         (spaced-content :day (run "tasks" "day" "2026-09-20")))))
+
+(deftest day-reads-a-context-parent-finished-after-the-day-as-open
+  (insert! {:title "Write design" :status :done :finish-date (LocalDate/of 2026 9 22)
+            :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+  (insert! {:title "Outline" :parent-id 1 :status :done :finish-date (LocalDate/of 2026 9 20)
+            :created-at (LocalDateTime/of 2026 9 11 9 0 0)})
+  (is (= ["2026-09-20"
+          "----------"
+          "Done"
+          "  [ ] 1 Write design"
+          "    [x] 2 Outline"
+          "Open"
+          "  [ ] 1 Write design"]
+         (spaced-content :day (run "tasks" "day" "2026-09-20")))))
+
+(deftest day-orders-parents-and-subtasks-by-id-with-context-rows-among-the-parentless-tasks
+  (insert! {:title "Closed parent" :status :done :finish-date (LocalDate/of 2026 9 18)
+            :created-at (LocalDateTime/of 2026 9 10 9 0 0)})
+  (insert! {:title "Plain task" :created-at (LocalDateTime/of 2026 9 11 9 0 0)})
+  (insert! {:title "Second step" :parent-id 1 :created-at (LocalDateTime/of 2026 9 14 9 0 0)})
+  (insert! {:title "First step" :parent-id 1 :created-at (LocalDateTime/of 2026 9 13 9 0 0)})
+  (is (= ["2026-09-20"
+          "----------"
+          "Open"
+          "  [x] 1 Closed parent"
+          "    [ ] 3 Second step"
+          "    [ ] 4 First step"
+          "  [ ] 2 Plain task"]
+         (spaced-content :day (run "tasks" "day" "2026-09-20")))))
+
+(deftest day-dims-a-context-row-only-when-color-is-on
+  (insert! {:title "Write design" :status :doing :created-at (LocalDateTime/of 2026 9 12 9 0 0)})
+  (insert! {:title "Outline" :parent-id 1 :status :done :finish-date (LocalDate/of 2026 9 20)
+            :created-at (LocalDateTime/of 2026 9 13 9 0 0)})
+  (let [colored (spaced-content :day (cli/run helpers/*components* {:color? true} ["tasks" "day" "2026-09-20"]))
+        plain   (run "tasks" "day" "2026-09-20")
+        plain-content (spaced-content :day plain)]
+    (testing "with color on, the context row under Done is dimmed and nothing else is"
+      (is (str/includes? (get colored 3 "") "\u001b[2m") (pr-str (get colored 3)))
+      (is (= "  [~] 1 Write design" (str/replace (get colored 3 "") ansi "")))
+      (is (not-any? #(str/includes? % "\u001b[2m") (concat (take 3 colored) (drop 4 colored)))))
+    (testing "color changes nothing but the escape codes"
+      (is (= plain-content (mapv #(str/replace % ansi "") colored))))
+    (testing "with color off, no escape codes at all"
+      (is (not (str/includes? (:out plain) "\u001b"))))))
+
+;; The t alias
+
+(defn- run-on-fresh-db
+  "Runs argv against a new database holding a doing task with a subtask and a
+  dropped task. Returns the result and the stored rows afterwards."
+  [argv]
+  (let [dir  (fs/create-temp-dir {:prefix "knope-alias-"})
+        path (str (fs/path dir "tasks.db"))]
+    (try
+      (let [components (helpers/test-components path)
+            add!       #(sqlite.task/insert! (gen.task/task (assoc % :id nil)) path)]
+        (add! {:title "Write design" :status :doing})
+        (add! {:title "Outline" :parent-id 1})
+        (add! {:title "Old spike" :status :dropped})
+        {:result (cli/run components {:color? false} argv)
+         :rows   (sqlite/query path ["SELECT * FROM tasks ORDER BY id"])})
+      (finally
+        (fs/delete-tree dir)))))
+
+(deftest t-gives-the-same-result-as-tasks-for-every-subcommand
+  (doseq [args [[]
+                ["add" "New thing"]
+                ["add" "Sub" "--parent" "1"]
+                ["add"]
+                ["add" "x" "--bogus" "1"]
+                ["list"]
+                ["list" "--all"]
+                ["list" "--page" "2"]
+                ["view" "1"]
+                ["start" "2"]
+                ["done" "1"]
+                ["drop" "2"]
+                ["reopen" "3"]
+                ["edit" "1" "--title" "Renamed"]
+                ["rm" "2"]
+                ["rm" "1" "--force"]
+                ["day" "2026-09-28"]
+                ["day" "fri"]
+                ["search" "design"]
+                ["search"]
+                ["done" "99"]
+                ["done"]
+                ["bogus"]]]
+    (testing (pr-str args)
+      (let [;; Messages pick a random variant; pin it so both runs can match.
+            [long short] (with-redefs [rand-nth first]
+                           [(run-on-fresh-db (into ["tasks"] args))
+                            (run-on-fresh-db (into ["t"] args))])]
+        (is (= long short))
+        (is (= (:result long) (:result short)))))))
+
+(deftest t-lists-tasks-like-tasks-and-keeps-the-full-form-in-hints
+  (add-open-tasks! 51)
+  (let [content (spaced-content :list (run "t" "list"))]
+    (is (= "More on page 1: knope tasks list --page 1" (last content)))))
+
+(deftest usage-ends-with-the-line-that-lists-t-as-short-for-tasks
+  (let [{:keys [out]} (run "--help")]
+    (is (re-find #"(?m)^  t +Short for tasks, as in knope t add\.\n?\z" out) (pr-str (last (str/split-lines out))))))
 
 (def ^:private empty-search
   {:exit 1 :out "" :err "Search needs at least one word.
@@ -1510,9 +1714,11 @@ Task ids are numbers. I'd know, I filed every one.
         lines                  (lines-of out)]
     (is (= 0 exit))
     (is (= "" err))
-    (is (= 3 (count lines)) out)
+    (is (= 5 (count lines)) out)
     (is (said-line? (first lines) :list/intro {}) (str "intro: " (first lines)))
-    (is (str/includes? (second lines) "Pay rent"))
+    (is (= "" (second lines)))
+    (is (str/includes? (nth lines 2) "Pay rent"))
+    (is (= "" (nth lines 3)))
     (is (said-line? (last lines) :list/ending {}) (str "ending: " (last lines)))))
 
 (deftest piped-list-carries-the-leslie-lines-without-color-codes

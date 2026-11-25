@@ -479,3 +479,67 @@
 
 (deftest day-sections-of-no-tasks-is-three-empty-sections
   (is (= {:done [] :dropped [] :open []} (logic.task/day-sections [] day))))
+
+(deftest as-of-day-reads-a-task-finished-after-the-day-as-todo
+  (let [done (day-task 1 {:status :done :finish-date (LocalDate/of 2026 9 22)
+                          :created-at (LocalDateTime/of 2026 9 10 9 0 0)})]
+    (is (= :todo (:status (logic.task/as-of-day done day))))))
+
+(deftest as-of-day-keeps-a-task-finished-on-or-before-the-day
+  (let [created (LocalDateTime/of 2026 9 10 9 0 0)
+        on-day  (day-task 1 {:status :done :finish-date day :created-at created})
+        earlier (day-task 2 {:status :dropped :finish-date (LocalDate/of 2026 9 19) :created-at created})]
+    (is (= on-day (logic.task/as-of-day on-day day)))
+    (is (= earlier (logic.task/as-of-day earlier day)))))
+
+(deftest as-of-day-keeps-an-open-task
+  (let [doing (day-task 1 {:status :doing :created-at (LocalDateTime/of 2026 9 10 9 0 0)})]
+    (is (= doing (logic.task/as-of-day doing day)))))
+
+(def ^:private none {:done [] :dropped [] :open []})
+
+(deftest day-tree-nests-a-subtask-under-its-parent-in-the-same-section
+  (let [parent (day-task 1 {:status :doing})
+        child  (day-task 2 {:parent-id 1})]
+    (is (= (assoc none :open [{:task parent :children [child] :context? false}])
+           (logic.task/day-tree (assoc none :open [parent child]) [parent child])))))
+
+(deftest day-tree-orders-roots-and-children-by-id
+  (let [a (day-task 1 {})
+        b (day-task 2 {})
+        c (day-task 3 {:parent-id 1})
+        d (day-task 4 {:parent-id 1})]
+    (is (= (assoc none :open [{:task a :children [c d] :context? false}
+                              {:task b :children [] :context? false}])
+           (logic.task/day-tree (assoc none :open [d b c a]) [a b c d])))))
+
+(deftest day-tree-gives-a-subtask-whose-parent-is-in-another-section-a-context-parent
+  (let [parent (day-task 1 {:status :doing})
+        child  (day-task 2 {:parent-id 1 :status :done :finish-date day})]
+    (is (= {:done    [{:task parent :children [child] :context? true}]
+            :dropped []
+            :open    [{:task parent :children [] :context? false}]}
+           (logic.task/day-tree {:done [child] :dropped [] :open [parent]} [parent child])))))
+
+(deftest day-tree-takes-a-context-parent-from-the-parents-given
+  (let [parent (day-task 1 {:status :done :finish-date (LocalDate/of 2026 9 18)})
+        child  (day-task 2 {:parent-id 1})]
+    (is (= (assoc none :open [{:task parent :children [child] :context? true}])
+           (logic.task/day-tree (assoc none :open [child]) [child parent])))))
+
+(deftest day-tree-keeps-a-parent-with-subtasks-in-two-sections-in-both
+  (let [parent (day-task 1 {:status :doing})
+        done   (day-task 2 {:parent-id 1 :status :done :finish-date day})
+        open   (day-task 3 {:parent-id 1})]
+    (is (= {:done    [{:task parent :children [done] :context? true}]
+            :dropped []
+            :open    [{:task parent :children [open] :context? false}]}
+           (logic.task/day-tree {:done [done] :dropped [] :open [parent open]} [parent done open])))))
+
+(deftest day-tree-puts-context-parents-among-the-roots-by-id
+  (let [parent (day-task 1 {:status :done :finish-date (LocalDate/of 2026 9 18)})
+        plain  (day-task 2 {})
+        child  (day-task 3 {:parent-id 1})]
+    (is (= (assoc none :open [{:task parent :children [child] :context? true}
+                              {:task plain :children [] :context? false}])
+           (logic.task/day-tree (assoc none :open [plain child]) [parent plain child])))))

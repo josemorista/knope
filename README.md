@@ -40,6 +40,7 @@ knope tasks edit ID [--title T] [--due DATE] [--note TEXT] [--clear-due]
 knope tasks rm ID [--force]
 knope tasks day [DATE]
 knope tasks search TEXT
+knope t <command>
 knope remote set <git-url>
 knope push [--force]
 knope pull [--force]
@@ -47,7 +48,9 @@ knope update
 knope --version
 ```
 
-A task can have subtasks, one level deep. `tasks list` shows pending tasks, 50 per page, and `--all` includes closed ones. `tasks view` shows one task in full, with its note, parent and subtasks. `tasks rm` refuses to delete a task that has subtasks unless you pass `--force`. `tasks search` finds tasks whose title or note has every word as a prefix. `tasks day` shows what was done, dropped and open on a day, today by default.
+`t` is short for `tasks`: `knope t add "Buy stamps"` works like `knope tasks add "Buy stamps"`.
+
+A task can have subtasks, one level deep. `tasks list` shows pending tasks, 50 per page, and `--all` includes closed ones. `tasks view` shows one task in full, with its note, parent and subtasks. `tasks rm` refuses to delete a task that has subtasks unless you pass `--force`. `tasks search` finds tasks whose title or note has every word as a prefix. `tasks day` shows what was done, dropped and open on a day, today by default, with subtasks under their parent. A parent that is not itself on that day appears above its subtask, dimmed when color is on.
 
 Dates are written as `YYYY-MM-DD`, `today`, `tomorrow`, `yesterday`, `+Nd` or `-Nd`.
 
@@ -60,10 +63,14 @@ $ knope tasks add "Book the venue" --parent 1
 Task 2 is on the list! I've already started a binder for it.
 $ knope tasks start 2
 Task 2 is in progress. Let's make Pawnee proud!
-$ knope tasks list
+$ knope t list
+Here's the agenda, let's get to work:
+
 [ ] 1 Plan the harvest festival  0/1  in 3d
   [~] 2 Book the venue
-$ knope tasks done 2
+
+Now go make Pawnee proud.
+$ knope t done 2
 Task 2 is DONE! This calls for waffles.
 ```
 

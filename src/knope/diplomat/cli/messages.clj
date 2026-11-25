@@ -56,7 +56,8 @@ Commands:
   push [--force]                                                      Upload this database, encrypted; --force replaces newer remote changes.
   pull [--force]                                                      Replace this database with the remote's; --force discards local changes.
   update                                                              Replace this knope.jar with the latest release.
-  --version                                                           Show the installed version.")
+  --version                                                           Show the installed version.
+  t                                                                   Short for tasks, as in knope t add.")
 
    :cli/version
    (plain (fn [{:keys [version]}] (str "knope " version)))
@@ -171,9 +172,9 @@ Commands:
                (on-date "Nothing recorded for %s. Rest is part of the plan too.")]}
 
    :list/intro
-   (plain "Here's the agenda. Let's get to work!"
-          "Your tasks, organized and ready for action."
-          "Behold, the master plan.")
+   (plain "Here's the agenda, let's get to work:"
+          "Your tasks, organized and ready for action:"
+          "Behold, the master plan:")
 
    :list/ending
    (plain "You've got this. I believe in you more than I believe in waffles."
@@ -181,9 +182,9 @@ Commands:
           "Now go make Pawnee proud.")
 
    :search/intro
-   (plain "I searched every binder. Here's what turned up."
-          "Search results, fresh from the archives."
-          "Found them! Here's what matches.")
+   (plain "I searched every binder, and here's what turned up:"
+          "Search results, fresh from the archives:"
+          "Found them! Here's what matches:")
 
    :search/ending
    (plain "That's everything I could find."
@@ -191,9 +192,9 @@ Commands:
           "Investigation complete.")
 
    :day/intro
-   (plain "Here's how the day went."
-          "The official record for the day."
-          "Minutes of the day, as taken by yours truly.")
+   (plain "Here's how the day went:"
+          "The official record for the day:"
+          "Minutes of the day, as taken by yours truly:")
 
    :day/ending
    (plain "Every day is a chance to do better than the last."
@@ -201,9 +202,9 @@ Commands:
           "Another day in the books.")
 
    :view/intro
-   (plain "Here's the full file."
-          "Everything I know about this task."
-          "Pulling the binder for you.")
+   (plain "Here's the full file:"
+          "Everything I know about this task:"
+          "I pulled the binder for you:")
 
    :view/ending
    (plain "That's the whole story."

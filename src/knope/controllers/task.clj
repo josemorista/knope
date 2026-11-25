@@ -43,10 +43,14 @@
     {:error/code :task/not-found :error/details {:id id}}))
 
 (defn day
-  "The tasks recorded for date, split into {:done :dropped :open}."
+  "The tasks recorded for date, split into {:done :dropped :open}, each section
+  a list of {:task t :children [t] :context? bool} entries."
   [date {:keys [sqlite]}]
-  (-> (sqlite.task/day-rows date (logic.date/next-day date) sqlite)
-      (logic.task/day-sections date)))
+  (let [rows     (sqlite.task/day-rows date (logic.date/next-day date) sqlite)
+        present  (set (map :id rows))
+        missing  (into #{} (comp (keep :parent-id) (remove present)) rows)
+        parents  (when (seq missing) (sqlite.task/find-by-ids missing sqlite))]
+    (logic.task/day-tree (logic.task/day-sections rows date) (concat rows parents))))
 
 (def ^:private page-size 50)
 
