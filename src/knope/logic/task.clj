@@ -95,6 +95,34 @@
      :open    (by-id #(and (.isBefore (:created-at %) day-end)
                            (or (nil? (:finish-date %)) (.isAfter (:finish-date %) day))))}))
 
+(defn as-of-day
+  "The task as it read on day: one finished after day was still open, so it
+  reads as todo."
+  [task day]
+  (cond-> task
+    (and (:finish-date task) (.isAfter (:finish-date task) day)) (assoc :status :todo)))
+
+(defn day-tree
+  "Groups each day-sections section into entries {:task t :children [t]
+  :context? bool}, roots and children by id. A subtask whose parent is not in
+  its section goes under a context entry for that parent, taken from parents,
+  the tasks every parent id can be looked up in."
+  [sections parents]
+  (let [by-id (into {} (map (juxt :id identity)) parents)]
+    (update-vals
+     sections
+     (fn [tasks]
+       (let [in-section (set (map :id tasks))
+             children   (group-by :parent-id (filter :parent-id tasks))]
+         (->> (concat (map (fn [task] [task false]) (remove :parent-id tasks))
+                      (map (fn [pid] [(by-id pid) true])
+                           (remove in-section (keys children))))
+              (sort-by (comp :id first))
+              (mapv (fn [[task context?]]
+                      {:task     task
+                       :children (vec (sort-by :id (children (:id task))))
+                       :context? context?}))))))))
+
 (defn page-roots
   "Tasks fetched with one root past page-size: drops that root and its children
   and reports whether it existed."

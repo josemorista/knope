@@ -8,7 +8,8 @@
             [knope.controllers.task :as controllers.task]
             [knope.controllers.update :as controllers.update]
             [knope.diplomat.cli.messages :as messages]
-            [knope.diplomat.cli.render :as render]))
+            [knope.diplomat.cli.render :as render]
+            [knope.logic.task :as logic.task]))
 
 (defn- error-result [error]
   {:exit 1 :out "" :err (str (messages/say (:error/code error) (:error/details error)) "\n")})
@@ -24,13 +25,13 @@
           {:exit 0 :out (str (messages/say :task/added {:id (:id task)}) "\n") :err ""})))))
 
 (defn- framed
-  "The intro, the lines and the ending, one per line; the empty message alone
-  when there are no lines."
+  "The intro, a blank line, the lines, a blank line and the ending, one per
+  line; the empty message alone when there are no lines."
   [topic details lines]
   (let [say #(messages/say (keyword (name topic) %) details)]
     (str (str/join "\n" (if (empty? lines)
                           [(say "empty")]
-                          (concat [(say "intro")] lines [(say "ending")])))
+                          (concat [(say "intro") ""] lines ["" (say "ending")])))
          "\n")))
 
 (defn- list-tasks [components opts {cli-opts :opts}]
@@ -56,18 +57,15 @@
     (if (:error/code date)
       (error-result date)
       (let [sections (controllers.task/day date components)
-            row      (fn [task]
-                       (-> (adapters.task/task->display-row task today {:parent-ref (:parent-id task)})
+            row      (fn [task options]
+                       (-> (logic.task/as-of-day task date)
+                           (adapters.task/task->display-row today options)
                            (dissoc :due-label :urgency)))
-            ;; A task finished after the day was still open on it.
-            as-open  (fn [task]
-                       (cond-> task (#{:done :dropped} (:status task)) (assoc :status :todo)))
+            entry    (fn [{:keys [task children context?]}]
+                       {:row      (row task {:dimmed? context?})
+                        :children (mapv #(row % {}) children)})
             lines    (when (some seq (vals sections))
-                       (render/section-lines date
-                                             (-> sections
-                                                 (update-vals #(mapv row %))
-                                                 (assoc :open (mapv (comp row as-open) (:open sections))))
-                                             opts))]
+                       (render/section-lines date (update-vals sections #(mapv entry %)) opts))]
         {:exit 0 :out (framed :day {:date (str date)} lines) :err ""}))))
 
 (defn- search [components opts {cli-opts :opts}]
@@ -292,7 +290,7 @@
 (defn run
   [components opts argv]
   (try
-    (dispatch components opts argv)
+    (dispatch components opts (cond-> argv (= "t" (first argv)) (assoc 0 "tasks")))
     (catch clojure.lang.ExceptionInfo e
       (let [{:keys [type cause] :as data} (ex-data e)]
         (if (and (= :org.babashka/cli type) (#{:input-exhausted :no-match} cause))

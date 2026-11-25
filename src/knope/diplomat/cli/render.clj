@@ -30,13 +30,18 @@
         entries))
 
 (defn section-lines
-  "The date, then each non-empty section of display rows under its heading,
-  rows indented two spaces."
+  "The date, a row of dashes as wide as it, then each non-empty section of
+  entries {:row r :children [r ...]} under its heading, rows indented two
+  spaces and children four."
   [date {:keys [done dropped open]} {:keys [color?]}]
   (let [sections (remove (comp empty? second) [["Done" done] ["Dropped" dropped] ["Open" open]])]
-    (into [(str date)]
-          (mapcat (fn [[heading rows]]
-                    (cons heading (map #(row-line % "  " color?) rows))))
+    (into [(str date) (apply str (repeat (count (str date)) \-))]
+          (mapcat (fn [[heading entries]]
+                    (cons heading
+                          (mapcat (fn [{:keys [row children]}]
+                                    (cons (row-line row "  " color?)
+                                          (map #(row-line % "    " color?) children)))
+                                  entries))))
           sections)))
 
 (defn detail-lines

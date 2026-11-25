@@ -74,3 +74,28 @@
 (deftest say-gives-an-error-its-instruction-then-the-leslie-line
   (is (= "Task 99 not found.\nI looked everywhere, even in the Parks basement."
          (messages/say :task/not-found {:id 99}))))
+
+(def ^:private framed-intros
+  {:list/intro   ["Here's the agenda, let's get to work:"
+                  "Your tasks, organized and ready for action:"
+                  "Behold, the master plan:"]
+   :search/intro ["I searched every binder, and here's what turned up:"
+                  "Search results, fresh from the archives:"
+                  "Found them! Here's what matches:"]
+   :day/intro    ["Here's how the day went:"
+                  "The official record for the day:"
+                  "Minutes of the day, as taken by yours truly:"]
+   :view/intro   ["Here's the full file:"
+                  "Everything I know about this task:"
+                  "I pulled the binder for you:"]})
+
+(deftest every-intro-of-a-framed-view-ends-with-a-colon
+  (doseq [key (keys framed-intros)]
+    (testing (str key)
+      (is (= 3 (count (:variants (get messages/entries key)))))
+      (is (every? #(str/ends-with? % ":") (:variants (get messages/entries key)))))))
+
+(deftest the-framed-view-intros-are-the-designed-copy
+  (doseq [[key variants] framed-intros]
+    (testing (str key)
+      (is (= (set variants) (set (:variants (get messages/entries key))))))))

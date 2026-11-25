@@ -17,6 +17,15 @@ VALUES (?, ?, ?, ?, ?, ?, ?)"]
           first
           adapters.task/row->task))
 
+(defn find-by-ids
+  "The tasks with the given ids, in no particular order."
+  [ids db-path]
+  (mapv adapters.task/row->task
+        (sqlite/query db-path
+                      (into [(str "SELECT * FROM tasks WHERE id IN ("
+                                  (str/join ", " (repeat (count ids) "?")) ")")]
+                            ids))))
+
 (defn find-with-children
   "Task id and every subtask of it, in no particular order."
   [id db-path]
