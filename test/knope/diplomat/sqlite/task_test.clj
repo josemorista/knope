@@ -426,3 +426,11 @@
   (insert-all! [(gen.task/task {:id nil :title "Parent"})
                 (gen.task/task {:id nil :title "Step" :parent-id 1})])
   (is (empty? (sqlite.task/find-with-children 99 (db)))))
+
+(deftest open-candidates-returns-open-tasks-by-id-and-roots-only-on-request
+  (insert-all! [(gen.task/task {:id nil :title "Root" :status :todo})
+                (gen.task/task {:id nil :title "Step" :parent-id 1 :status :doing})
+                (gen.task/task {:id nil :title "Finished" :status :done})
+                (gen.task/task {:id nil :title "Dropped" :status :dropped})])
+  (is (= [{:id 1 :title "Root"} {:id 2 :title "Step"}] (sqlite.task/open-candidates false (db))))
+  (is (= [{:id 1 :title "Root"}] (sqlite.task/open-candidates true (db)))))

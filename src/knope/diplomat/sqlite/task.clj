@@ -26,6 +26,14 @@ VALUES (?, ?, ?, ?, ?, ?, ?)"]
                                   (str/join ", " (repeat (count ids) "?")) ")")]
                             ids))))
 
+(defn open-candidates
+  "Id and title of every todo or doing task, by id; only the ones that are not
+  subtasks when roots-only? is true."
+  [roots-only? db-path]
+  (sqlite/query db-path [(str "SELECT id, title FROM tasks WHERE status IN ('todo', 'doing')"
+                              (when roots-only? " AND parent_id IS NULL")
+                              " ORDER BY id")]))
+
 (defn find-with-children
   "Task id and every subtask of it, in no particular order."
   [id db-path]

@@ -4,7 +4,7 @@ A small task list for the command line, named for Leslie Knope, who would have a
 
 ## Requirements
 
-- [babashka](https://github.com/babashka/babashka) 1.12.215 or later.
+- [babashka](https://github.com/babashka/babashka) 1.13.229 or later.
 - Network access on the first run. babashka downloads the SQLite pod once and caches it. Without the network and without the cached pod, the first command fails inside babashka before knope starts, and nothing is written.
 
 ## Install
@@ -45,6 +45,7 @@ knope remote set <git-url>
 knope push [--force]
 knope pull [--force]
 knope update
+knope completion bash|zsh
 knope --version
 ```
 
@@ -73,6 +74,20 @@ Now go make Pawnee proud.
 $ knope t done 2
 Task 2 is DONE! This calls for waffles.
 ```
+
+## Completion
+
+knope completes commands, flags and the IDs of open tasks in bash and zsh. Add one line to your shell's startup file:
+
+```sh
+# zsh, after compinit
+source <(knope completion zsh)
+
+# bash
+source <(knope completion bash)
+```
+
+Completing a command or flag never touches your database; completing a task ID reads it.
 
 ## Data and colors
 
