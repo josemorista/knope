@@ -9,6 +9,7 @@
             [knope.controllers.update :as controllers.update]
             [knope.diplomat.cli.messages :as messages]
             [knope.diplomat.cli.render :as render]
+            [knope.diplomat.sqlite.task :as sqlite.task]
             [knope.logic.task :as logic.task]))
 
 (defn- error-result [error]
@@ -214,67 +215,111 @@
                (error-result match)
                (handler parsed))))))
 
+(declare dispatch)
+
+(defn- completion [components opts {cli-opts :opts :as parsed}]
+  (let [shell (:shell cli-opts)]
+    (cond
+      (nil? shell)                  (fallback parsed)
+      (not (#{"bash" "zsh"} shell)) (error-result {:error/code :validation/bad-shell})
+      :else
+      {:exit 0
+       :out  (with-out-str
+               (dispatch components opts ["org.babashka.cli/completions" "snippet" "--shell" shell]))
+       :err  ""})))
+
+(defn- candidates
+  "Completion candidates for the open tasks, or none when anything goes wrong,
+  as a broken database must not break the user's shell."
+  [roots-only? components]
+  (try
+    (mapv (fn [{:keys [id title]}]
+            {:value (str id) :description (str/replace title #"[\t\r\n]" " ")})
+          (sqlite.task/open-candidates roots-only? (force (:sqlite components))))
+    (catch Exception _ [])))
+
+(defn- with-positional-specs
+  "Every positional argument is marked so completion keeps it out of the flags;
+  the entry's own :spec adds to it."
+  [{:keys [args->opts] :as entry}]
+  (update entry :spec #(merge-with merge (zipmap args->opts (repeat {:positional true})) %)))
+
 (defn- dispatch [components opts argv]
-  (cli/dispatch (conj (into (mapv (partial shape-checked argv)
-                            [{:cmds       ["tasks" "add"]
-                              :fn         (partial add components)
-                              :args->opts [:title]
-                              :coerce     {:title :string :due :string :note :string :parent :string}}
-                             {:cmds   ["tasks" "list"]
-                              :fn     (partial list-tasks components opts)
-                              :coerce {:all :boolean :page :string}}
-                             {:cmds       ["tasks" "view"]
-                              :fn         (partial view components opts)
-                              :args->opts [:id]
-                              :coerce     {:id :string}}
-                             {:cmds       ["tasks" "start"]
-                              :fn         (partial transition components :start)
-                              :args->opts [:id]
-                              :coerce     {:id :string}}
-                             {:cmds       ["tasks" "done"]
-                              :fn         (partial transition components :done)
-                              :args->opts [:id]
-                              :coerce     {:id :string}}
-                             {:cmds       ["tasks" "drop"]
-                              :fn         (partial transition components :drop)
-                              :args->opts [:id]
-                              :coerce     {:id :string}}
-                             {:cmds       ["tasks" "reopen"]
-                              :fn         (partial transition components :reopen)
-                              :args->opts [:id]
-                              :coerce     {:id :string}}
-                             {:cmds       ["tasks" "edit"]
-                              :fn         (partial edit components)
-                              :args->opts [:id]
-                              :coerce     {:id :string :title :string :due :string :note :string :clear-due :boolean}}
-                             {:cmds       ["tasks" "rm"]
-                              :fn         (partial rm components)
-                              :args->opts [:id]
-                              :coerce     {:id :string :force :boolean}}
-                             {:cmds       ["tasks" "day"]
-                              :fn         (partial day components opts)
-                              :args->opts [:date]
-                              :coerce     {:date :string}}
-                             {:cmds       ["remote" "set"]
-                              :fn         (partial remote-set components)
-                              :args->opts [:url]
-                              :coerce     {:url :string}}
-                             {:cmds   ["push"]
-                              :fn     (partial push components)
-                              :coerce {:force :boolean}}
-                             {:cmds   ["pull"]
-                              :fn     (partial pull components)
-                              :coerce {:force :boolean}}
-                             {:cmds   ["update"]
-                              :fn     (partial update-jar components)
-                              :coerce {}}])
-                          [(empty-search-first
-                            (shape-checked argv {:cmds       ["tasks" "search"]
-                                                 :fn         (partial search components opts)
-                                                 :args->opts [:text]
-                                                 :coerce     {:text :string}}))])
-                      {:cmds [] :fn (partial version components)})
-                argv))
+  (let [open-ids {:id {:complete-fn (fn [_] (candidates false components))}}]
+    (cli/dispatch (conj (into (mapv (comp (partial shape-checked argv) with-positional-specs)
+                                    [{:cmds       ["tasks" "add"]
+                                      :fn         (partial add components)
+                                      :args->opts [:title]
+                                      :coerce     {:title :string :due :string :note :string :parent :string}
+                                      :spec       {:parent {:complete-fn (fn [_] (candidates true components))}}}
+                                     {:cmds   ["tasks" "list"]
+                                      :fn     (partial list-tasks components opts)
+                                      :coerce {:all :boolean :page :string}}
+                                     {:cmds       ["tasks" "view"]
+                                      :fn         (partial view components opts)
+                                      :args->opts [:id]
+                                      :coerce     {:id :string}
+                                      :spec       open-ids}
+                                     {:cmds       ["tasks" "start"]
+                                      :fn         (partial transition components :start)
+                                      :args->opts [:id]
+                                      :coerce     {:id :string}
+                                      :spec       open-ids}
+                                     {:cmds       ["tasks" "done"]
+                                      :fn         (partial transition components :done)
+                                      :args->opts [:id]
+                                      :coerce     {:id :string}
+                                      :spec       open-ids}
+                                     {:cmds       ["tasks" "drop"]
+                                      :fn         (partial transition components :drop)
+                                      :args->opts [:id]
+                                      :coerce     {:id :string}
+                                      :spec       open-ids}
+                                     {:cmds       ["tasks" "reopen"]
+                                      :fn         (partial transition components :reopen)
+                                      :args->opts [:id]
+                                      :coerce     {:id :string}
+                                      :spec       {:id {:complete false}}}
+                                     {:cmds       ["tasks" "edit"]
+                                      :fn         (partial edit components)
+                                      :args->opts [:id]
+                                      :coerce     {:id :string :title :string :due :string :note :string :clear-due :boolean}
+                                      :spec       open-ids}
+                                     {:cmds       ["tasks" "rm"]
+                                      :fn         (partial rm components)
+                                      :args->opts [:id]
+                                      :coerce     {:id :string :force :boolean}
+                                      :spec       open-ids}
+                                     {:cmds       ["tasks" "day"]
+                                      :fn         (partial day components opts)
+                                      :args->opts [:date]
+                                      :coerce     {:date :string}}
+                                     {:cmds       ["remote" "set"]
+                                      :fn         (partial remote-set components)
+                                      :args->opts [:url]
+                                      :coerce     {:url :string}}
+                                     {:cmds   ["push"]
+                                      :fn     (partial push components)
+                                      :coerce {:force :boolean}}
+                                     {:cmds   ["pull"]
+                                      :fn     (partial pull components)
+                                      :coerce {:force :boolean}}
+                                     {:cmds   ["update"]
+                                      :fn     (partial update-jar components)
+                                      :coerce {}}
+                                     {:cmds       ["completion"]
+                                      :fn         (partial completion components opts)
+                                      :args->opts [:shell]
+                                      :coerce     {:shell :string}
+                                      :spec       {:shell {:complete ["bash" "zsh"]}}}])
+                                  [((comp empty-search-first (partial shape-checked argv) with-positional-specs)
+                                    {:cmds       ["tasks" "search"]
+                                     :fn         (partial search components opts)
+                                     :args->opts [:text]
+                                     :coerce     {:text :string}})])
+                        {:cmds [] :fn (partial version components)})
+                  argv
+                  {:prog "knope"})))
 
 (defn- missing-value
   "babashka.cli throws when a value option ends the argv; turn that into our
@@ -287,15 +332,39 @@
                      :error/details {:option (name option)}})
       (throw e))))
 
+(def ^:private completions-command "org.babashka.cli/completions")
+
+(defn- alias-words
+  "Rewrites the `t` alias to `tasks`: as the first word, and in a completion
+  call as the first word being completed when another word follows it, so a
+  lone `t` still completes to `tasks`."
+  [argv]
+  (let [at (when (and (= completions-command (first argv)) (= "complete" (second argv)))
+             (inc (.indexOf ^java.util.List argv "--")))]
+    (cond
+      (= "t" (first argv))                                     (assoc argv 0 "tasks")
+      (and (pos? (or at 0)) (= "t" (get argv at))
+           (< (inc at) (count argv)))                          (assoc argv at "tasks")
+      :else                                                    argv)))
+
 (defn run
   [components opts argv]
   (try
-    (dispatch components opts (cond-> argv (= "t" (first argv)) (assoc 0 "tasks")))
+    (or (dispatch components opts (alias-words argv))
+        (when (= completions-command (first argv))
+          {:exit 0 :out "" :err ""}))
     (catch clojure.lang.ExceptionInfo e
       (let [{:keys [type cause] :as data} (ex-data e)]
-        (if (and (= :org.babashka/cli type) (#{:input-exhausted :no-match} cause))
+        (cond
+          (and (= :org.babashka/cli type) (#{:input-exhausted :no-match} cause))
           (fallback data)
-          (missing-value e))))))
+
+          ;; A positional argument's own name, such as --title, is not an option.
+          (and (= :org.babashka/cli type) (= :restrict cause) (:flag data))
+          (error-result {:error/code    :validation/unknown-option
+                         :error/details {:option (:flag data)}})
+
+          :else (missing-value e))))))
 
 (defn color?
   "Color is on for a terminal unless NO_COLOR is set, even to an empty value."

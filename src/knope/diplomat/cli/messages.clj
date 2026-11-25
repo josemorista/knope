@@ -56,6 +56,7 @@ Commands:
   push [--force]                                                      Upload this database, encrypted; --force replaces newer remote changes.
   pull [--force]                                                      Replace this database with the remote's; --force discards local changes.
   update                                                              Replace this knope.jar with the latest release.
+  completion bash|zsh                                                 Print the shell completion script; load it with source <(knope completion zsh).
   --version                                                           Show the installed version.
   t                                                                   Short for tasks, as in knope t add.")
 
@@ -274,6 +275,10 @@ Commands:
    :validation/bad-remote
    (error "remote set needs a git URL, for example: knope remote set git@gist.github.com:<id>.git"
           "A partnership needs an address.")
+
+   :validation/bad-shell
+   (error "completion supports bash and zsh. Run knope completion bash or knope completion zsh."
+          "I only speak two shells, and I speak them beautifully.")
 
    :sync/no-remote
    (error "No remote is set for this database. Run knope remote set <git-url> first."

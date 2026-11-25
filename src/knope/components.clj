@@ -37,8 +37,16 @@
     (assoc (lite-components) :sqlite path)))
 
 (defn for-args
-  "The components a command needs: update and --version never open the database."
+  "The components a command needs: update, --version and printing the
+  completion script never open the database, and completing words and flags
+  opens it only if a candidate needs it."
   [env args]
-  (if (#{"update" "--version"} (first args))
+  (cond
+    (#{"update" "--version" "completion"} (first args))
     (lite-components)
+
+    (= "org.babashka.cli/completions" (first args))
+    (assoc (lite-components) :sqlite (delay (:sqlite (components env))))
+
+    :else
     (components env)))

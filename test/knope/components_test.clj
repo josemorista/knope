@@ -87,3 +87,51 @@
       (let [result (components/for-args {"KNOPE_DB" (str (fs/path dir "tasks.db"))} ["list"])]
         (is (fn? (get-in result [:release :latest-tag])))
         (is (fn? (get-in result [:release :download!])))))))
+
+(def ^:private completions-argv
+  ["org.babashka.cli/completions" "complete" "--shell" "zsh" "--" "tasks" ""])
+
+(deftest for-args-completion-builds-components-without-opening-the-database
+  (testing "a database path that cannot be opened does not stop the script"
+    (with-temp-dir
+      (fn [dir]
+        (let [blocker (fs/path dir "not-a-folder")
+              db-path (str (fs/path blocker "tasks.db"))]
+          (spit (str blocker) "a plain file, so nothing can be created under it")
+          (doseq [argv [["completion" "zsh"] ["completion" "bash"] ["completion" "fish"]]]
+            (let [result (components/for-args {"KNOPE_DB" db-path "HOME" (str dir)} argv)]
+              (is (map? result))
+              (is (not (contains? result :sqlite)))
+              (is (fn? (:clock result)))
+              (is (not (fs/exists? db-path)))))))))
+  (testing "no database file is created at a path that could be"
+    (with-temp-dir
+      (fn [dir]
+        (let [db-path (str (fs/path dir "tasks.db"))
+              result  (components/for-args {"KNOPE_DB" db-path} ["completion" "zsh"])]
+          (is (not (contains? result :sqlite)))
+          (is (not (fs/exists? db-path))))))))
+
+(deftest for-args-word-completion-defers-the-database-until-it-is-needed
+  (with-temp-dir
+    (fn [dir]
+      (let [db-path (str (fs/path dir "tasks.db"))
+            result  (components/for-args {"KNOPE_DB" db-path} completions-argv)]
+        (is (map? result))
+        (is (delay? (:sqlite result)))
+        (is (not (realized? (:sqlite result))))
+        (is (fn? (:clock result)))
+        (is (not (fs/exists? db-path)))
+        (testing "forcing it opens the database at the path the command would use"
+          (is (= db-path (force (:sqlite result))))
+          (is (fs/exists? db-path)))))))
+
+(deftest for-args-word-completion-with-an-unopenable-database-fails-only-when-forced
+  (with-temp-dir
+    (fn [dir]
+      (let [blocker (fs/path dir "not-a-folder")
+            db-path (str (fs/path blocker "tasks.db"))]
+        (spit (str blocker) "a plain file, so nothing can be created under it")
+        (let [result (components/for-args {"KNOPE_DB" db-path "HOME" (str dir)} completions-argv)]
+          (is (delay? (:sqlite result)))
+          (is (thrown? Exception (force (:sqlite result)))))))))

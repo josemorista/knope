@@ -3,6 +3,7 @@
             [babashka.process :as process]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [knope.components :as components]
             [knope.diplomat.cli :as cli]
             [knope.diplomat.cli.messages :as messages]
             [knope.diplomat.sqlite.task :as sqlite.task]
@@ -736,6 +737,7 @@ Commands:
   push [--force]                                                      Upload this database, encrypted; --force replaces newer remote changes.
   pull [--force]                                                      Replace this database with the remote's; --force discards local changes.
   update                                                              Replace this knope.jar with the latest release.
+  completion bash|zsh                                                 Print the shell completion script; load it with source <(knope completion zsh).
   --version                                                           Show the installed version.
   t                                                                   Short for tasks, as in knope t add.
 "
@@ -1773,3 +1775,225 @@ Task ids are numbers. I'd know, I filed every one.
     (is (said-line? (first lines) :list/intro {}) (str "intro: " (first lines)))
     (is (said-line? (last lines) :list/ending {}) (str "ending: " (last lines)))
     (is (not (str/includes? out "\u001b")))))
+
+;; Shell completion
+
+(defn- complete
+  "Runs the library's completion command for the words after `knope`, as the
+  shell scripts do. Returns the run result and what was printed."
+  [components & words]
+  (let [result (atom nil)
+        out    (with-out-str
+                 (reset! result
+                         (cli/run components {:color? false}
+                                  (into ["org.babashka.cli/completions" "complete" "--shell" "zsh" "--"]
+                                        words))))]
+    {:result @result :out out}))
+
+(defn- offered
+  "The candidate lines a completion printed, in order."
+  [{:keys [out]}]
+  (remove str/blank? (str/split-lines out)))
+
+(defn- offered-words
+  "The candidates without their descriptions, as a set."
+  [completion]
+  (set (map #(first (str/split % #"\t")) (offered completion))))
+
+(defn- completion-result-silent?
+  "True when the completion's own result adds nothing to what the library printed."
+  [{:keys [result]}]
+  (= {:exit 0 :out "" :err ""} result))
+
+(def ^:private task-words
+  #{"add" "list" "view" "start" "done" "drop" "reopen" "edit" "rm" "day" "search"})
+
+(deftest completion-prints-a-zsh-script-for-knope-and-exits-zero
+  (let [{:keys [exit out err]} (run "completion" "zsh")]
+    (is (= 0 exit))
+    (is (= "" err))
+    (is (str/starts-with? out "#compdef knope") out)
+    (is (str/includes? out "org.babashka.cli/completions complete --shell zsh"))))
+
+(deftest completion-prints-a-bash-script-for-knope-and-exits-zero
+  (let [{:keys [exit out err]} (run "completion" "bash")]
+    (is (= 0 exit))
+    (is (= "" err))
+    (is (str/includes? out "complete -F _babashka_cli_complete_knope knope") out)
+    (is (str/includes? out "org.babashka.cli/completions complete --shell bash"))))
+
+(deftest completion-scripts-differ-by-shell
+  (is (not= (:out (run "completion" "bash")) (:out (run "completion" "zsh")))))
+
+(deftest printing-the-completion-script-does-not-create-the-database
+  (let [dir     (fs/create-temp-dir {:prefix "knope-completion-test-"})
+        db-path (str (fs/path dir "sub" "tasks.db"))]
+    (try
+      (doseq [shell ["bash" "zsh"]]
+        (testing shell
+          (let [argv   ["completion" shell]
+                result (cli/run (components/for-args {"KNOPE_DB" db-path "HOME" (str dir)} argv)
+                                {:color? false} argv)]
+            (is (= 0 (:exit result)))
+            (is (str/includes? (:out result) "knope"))
+            (is (not (fs/exists? db-path)))
+            (is (not (fs/exists? (fs/path dir "sub")))))))
+      (finally
+        (fs/delete-tree dir)))))
+
+(deftest completion-for-an-unsupported-shell-is-refused-naming-bash-and-zsh
+  (let [{:keys [exit out err]} (run "completion" "fish")]
+    (is (= 1 exit))
+    (is (= "" out))
+    (is (str/includes? err "bash") err)
+    (is (str/includes? err "zsh") err)
+    (is (helpers/said? err :validation/bad-shell {}) err)))
+
+(deftest completion-words-offer-the-subcommands-after-tasks
+  (let [completion (complete helpers/*components* "tasks" "")]
+    (is (= task-words (offered-words completion)))
+    (is (completion-result-silent? completion))))
+
+(deftest completion-words-offer-the-same-subcommands-after-the-t-alias
+  (let [completion (complete helpers/*components* "t" "")]
+    (is (= task-words (offered-words completion)))
+    (is (completion-result-silent? completion))))
+
+(deftest completion-of-a-lone-t-offers-tasks
+  (let [completion (complete helpers/*components* "t")]
+    (is (= #{"tasks"} (offered-words completion)))
+    (is (completion-result-silent? completion))))
+
+(deftest completion-top-level-offers-the-commands-but-not-the-t-alias
+  (let [completion (complete helpers/*components* "")
+        words      (offered-words completion)]
+    (is (every? words ["tasks" "remote" "completion" "push" "pull" "update"]) (pr-str words))
+    (is (not (contains? words "t")))
+    (is (completion-result-silent? completion))))
+
+(deftest completion-offers-set-after-remote
+  (is (= #{"set"} (offered-words (complete helpers/*components* "remote" "")))))
+
+(deftest completion-offers-bash-and-zsh-after-completion
+  (is (= #{"bash" "zsh"} (offered-words (complete helpers/*components* "completion" "")))))
+
+(deftest completion-of-add-flags-offers-due-note-and-parent-but-not-title
+  (let [completion (complete helpers/*components* "tasks" "add" "--")]
+    (is (= #{"--due" "--note" "--parent"} (offered-words completion)))
+    (is (completion-result-silent? completion))))
+
+(deftest completion-of-flags-offers-only-the-flags-each-command-accepts
+  (is (= #{"--all" "--page"} (offered-words (complete helpers/*components* "tasks" "list" "--"))))
+  (is (= #{"--title" "--due" "--note" "--clear-due"}
+         (offered-words (complete helpers/*components* "tasks" "edit" "--"))))
+  (is (= #{"--force"} (offered-words (complete helpers/*components* "tasks" "rm" "--"))))
+  (is (= #{"--due" "--note" "--parent"}
+         (offered-words (complete helpers/*components* "t" "add" "--")))))
+
+(deftest completing-words-and-flags-never-opens-the-database
+  (let [opened     (atom false)
+        components (assoc helpers/*components*
+                          :sqlite (delay (reset! opened true) helpers/*db-path*))]
+    (doseq [words [["tasks" ""] ["t" ""] [""] ["remote" ""] ["completion" ""]
+                   ["tasks" "add" "--"] ["tasks" "edit" "--"]]]
+      (testing (pr-str words)
+        (is (seq (offered (apply complete components words))))))
+    (is (false? @opened))))
+
+(deftest completing-a-task-id-opens-the-database-the-command-would-use
+  (insert! {:title "Buy milk"})
+  (let [opened     (atom false)
+        components (assoc helpers/*components*
+                          :sqlite (delay (reset! opened true) helpers/*db-path*))]
+    (is (= ["1\tBuy milk"] (offered (complete components "tasks" "done" ""))))
+    (is (true? @opened))))
+
+(defn- seed-open-tasks! []
+  (insert! {:title "Buy milk"})
+  (insert! {:title "Pour it" :parent-id 1 :status :doing})
+  (insert! {:title "Old chore" :status :done})
+  (insert! {:title "Gone chore" :status :dropped})
+  (insert! {:title "Water\tthe\nplants\rnow"}))
+
+(deftest completion-of-a-task-id-offers-exactly-the-open-tasks-with-their-titles
+  (seed-open-tasks!)
+  (doseq [command ["start" "done" "drop" "view" "edit" "rm"]]
+    (testing command
+      (let [completion (complete helpers/*components* "tasks" command "")]
+        (is (= ["1\tBuy milk" "2\tPour it" "5\tWater the plants now"] (offered completion)))
+        (is (completion-result-silent? completion))))))
+
+(deftest completion-of-a-task-id-works-after-the-t-alias
+  (seed-open-tasks!)
+  (is (= ["1\tBuy milk" "2\tPour it" "5\tWater the plants now"]
+         (offered (complete helpers/*components* "t" "done" "")))))
+
+(deftest completion-of-parent-offers-only-open-tasks-that-are-not-subtasks
+  (seed-open-tasks!)
+  (let [completion (complete helpers/*components* "tasks" "add" "--parent" "")]
+    (is (= ["1\tBuy milk" "5\tWater the plants now"] (offered completion)))
+    (is (completion-result-silent? completion))))
+
+(deftest completion-of-parent-after-a-title-offers-the-same-roots
+  (seed-open-tasks!)
+  (is (= ["1\tBuy milk" "5\tWater the plants now"]
+         (offered (complete helpers/*components* "tasks" "add" "Pour it" "--parent" "")))))
+
+(deftest completion-of-a-task-id-offers-nothing-when-there-are-no-open-tasks
+  (insert! {:title "Old chore" :status :done})
+  (let [completion (complete helpers/*components* "tasks" "done" "")]
+    (is (= [] (offered completion)))
+    (is (completion-result-silent? completion))))
+
+(deftest completion-of-a-task-id-after-reopen-offers-nothing
+  (seed-open-tasks!)
+  (let [completion (complete helpers/*components* "tasks" "reopen" "")]
+    (is (= "" (:out completion)))
+    (is (completion-result-silent? completion))))
+
+(deftest completion-of-a-task-id-offers-nothing-when-the-database-cannot-be-opened
+  (seed-open-tasks!)
+  (doseq [words [["tasks" "done" ""] ["tasks" "add" "--parent" ""]]]
+    (testing (pr-str words)
+      (let [completion (apply complete
+                              (assoc helpers/*components* :sqlite (delay (throw (ex-info "cannot open" {}))))
+                              words)]
+        (is (= "" (:out completion)))
+        (is (completion-result-silent? completion))
+        (is (not (str/includes? (:out completion) "nil")))))))
+
+(deftest completion-through-the-real-components-offers-nothing-for-an-unopenable-database
+  (let [dir     (fs/create-temp-dir {:prefix "knope-completion-test-"})
+        blocker (fs/path dir "not-a-folder")
+        db-path (str (fs/path blocker "tasks.db"))]
+    (try
+      (spit (str blocker) "a plain file, so nothing can be created under it")
+      (let [argv       ["org.babashka.cli/completions" "complete" "--shell" "zsh" "--" "tasks" "done" ""]
+            components (components/for-args {"KNOPE_DB" db-path "HOME" (str dir)} argv)
+            out        (with-out-str
+                         (is (= {:exit 0 :out "" :err ""}
+                                (cli/run components {:color? false} argv))))]
+        (is (= "" out))
+        (is (not (fs/exists? db-path))))
+      (finally
+        (fs/delete-tree dir)))))
+
+(deftest completing-words-through-the-real-components-does-not-create-the-database
+  (let [dir     (fs/create-temp-dir {:prefix "knope-completion-test-"})
+        db-path (str (fs/path dir "tasks.db"))]
+    (try
+      (let [argv       ["org.babashka.cli/completions" "complete" "--shell" "zsh" "--" "tasks" ""]
+            components (components/for-args {"KNOPE_DB" db-path "HOME" (str dir)} argv)
+            out        (with-out-str (cli/run components {:color? false} argv))]
+        (is (= task-words (set (remove str/blank? (str/split-lines out)))))
+        (is (not (fs/exists? db-path))))
+      (finally
+        (fs/delete-tree dir)))))
+
+(deftest completion-without-a-shell-prints-usage-and-exits-one
+  (is (= {:exit 1 :out "" :err usage-text} (run "completion"))))
+
+(deftest a-positional-argument-name-used-as-a-flag-is-an-unknown-option
+  (insert! {:title "One"})
+  (is (= (unknown-option "id") (run "tasks" "done" "--id" "1")))
+  (is (= "todo" (:status (first (rows))))))
